@@ -23,6 +23,16 @@
         <div id="world"></div>
         <p id="empty-hint">Select Folder からフォルダーを追加してください<br><small>ドラッグ: ノード移動　背景ドラッグ: パン　ホイール: ズーム</small></p>
       </section>
+      <dialog id="destination-dialog">
+        <form method="dialog">
+          <label id="destination-label" for="destination-folder">移動先フォルダー</label>
+          <select id="destination-folder" required></select>
+          <div class="dialog-actions">
+            <button value="cancel">Cancel</button>
+            <button id="destination-confirm" value="confirm">実行</button>
+          </div>
+        </form>
+      </dialog>
     </main>
     <script type="module" src="/js/app.js"></script>
   </body>

@@ -22,10 +22,25 @@ canvas.actions.transfer = async (id, destinationId, copy = false) => { try { awa
 
 document.querySelector("#refresh").addEventListener("click", refresh);
 document.querySelector("#rename").addEventListener("click", () => canvas.actions.rename());
+const destinationDialog = document.querySelector("#destination-dialog");
+const destinationSelect = document.querySelector("#destination-folder");
+let pendingTransfer = null;
 for (const [button, copy] of [["#copy", true], ["#move", false]]) document.querySelector(button).addEventListener("click", () => {
   const item = canvas.selectedItem || canvas.nodes.get(canvas.selected); if (!item) return;
-  const folders = canvas.visibleFolders(); const destination = prompt(`移動先フォルダー名:\n${folders.map((folder) => folder.name).join(", ")}`);
-  const match = folders.find((folder) => folder.name === destination); if (match) canvas.actions.transfer(item.id, match.id, copy); else if (destination !== null) showError(new Error("表示中のフォルダー名と一致しません"));
+  const folders = canvas.visibleFolders(); destinationSelect.replaceChildren(...folders.map((folder) => new Option(folder.path, folder.id)));
+  if (!folders.length) { status.textContent = "移動先として使える表示中フォルダーがありません"; return; }
+  pendingTransfer = { itemId: item.id, copy, destinationIds: new Set(folders.map((folder) => folder.id)) };
+  document.querySelector("#destination-label").textContent = copy ? "コピー先フォルダー" : "移動先フォルダー";
+  document.querySelector("#destination-confirm").textContent = copy ? "コピー" : "移動";
+  destinationDialog.returnValue = "cancel";
+  status.textContent = copy ? "コピー先フォルダーを選択してください" : "移動先フォルダーを選択してください"; destinationDialog.showModal();
+});
+destinationDialog.addEventListener("close", () => {
+  const transfer = pendingTransfer; pendingTransfer = null;
+  if (destinationDialog.returnValue !== "confirm") { status.textContent = "操作をキャンセルしました"; return; }
+  const destinationId = destinationSelect.value;
+  if (!transfer?.destinationIds.has(destinationId)) { status.textContent = "有効な移動先が選択されていません"; return; }
+  canvas.actions.transfer(transfer.itemId, destinationId, transfer.copy);
 });
 
 try {

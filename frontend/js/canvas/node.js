@@ -26,10 +26,10 @@ export function updateNodeElement(element, node, selected, selectedItem, handler
     row.className = "file-item"; row.draggable = true; row.dataset.id = file.id;
     row.title = `${file.path}\nダブルクリック: 開く / 右クリック: 名前変更`;
     row.classList.toggle("selected", selectedItem === file.id); row.textContent = `📄 ${file.name}`;
-    row.addEventListener("pointerdown", (event) => { event.stopPropagation(); handlers.selectFile(file); });
+    row.addEventListener("pointerdown", (event) => { event.stopPropagation(); handlers.selectFile(file, row); });
     row.addEventListener("dblclick", (event) => { event.stopPropagation(); handlers.open(file.id); });
-    row.addEventListener("contextmenu", (event) => { event.preventDefault(); event.stopPropagation(); handlers.selectFile(file); handlers.rename(); });
-    row.addEventListener("dragstart", (event) => { handlers.selectFile(file); event.dataTransfer.setData("application/x-nodefilemanager-item", file.id); event.dataTransfer.effectAllowed = "copyMove"; });
+    row.addEventListener("contextmenu", (event) => { event.preventDefault(); event.stopPropagation(); handlers.selectFile(file, row); handlers.rename(); });
+    row.addEventListener("dragstart", (event) => { handlers.selectFile(file, row); event.dataTransfer.setData("application/x-nodefilemanager-item", file.id); event.dataTransfer.effectAllowed = "copyMove"; });
     return row;
   }) : []));
 }

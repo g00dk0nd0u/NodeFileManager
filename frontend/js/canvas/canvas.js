@@ -98,7 +98,14 @@ export class FolderCanvas {
     node.expanded = !node.expanded; this.render(); this.changed();
   }
 
-  handlers() { return { toggle: (id) => this.toggle(id), drag: (event, id) => this.startDrag(event, id), selectFolder: (id) => { this.selected = id; this.selectedItem = null; this.render(); }, selectFile: (file) => { this.selectedItem = file; this.render(); }, open: (id) => this.actions.open?.(id), rename: () => this.actions.rename?.(), drop: (event, id) => this.actions.transfer?.(event.dataTransfer.getData("application/x-nodefilemanager-item"), id, event.altKey) }; }
+  handlers() { return { toggle: (id) => this.toggle(id), drag: (event, id) => this.startDrag(event, id), selectFolder: (id) => { this.selected = id; this.selectedItem = null; this.render(); }, selectFile: (file, element) => this.selectFile(file, element), open: (id) => this.actions.open?.(id), rename: () => this.actions.rename?.(), drop: (event, id) => this.actions.transfer?.(event.dataTransfer.getData("application/x-nodefilemanager-item"), id, event.altKey) }; }
+
+  selectFile(file, element) {
+    this.world.querySelector(".file-item.selected")?.classList.remove("selected");
+    if (this.selected) this.elements.get(this.selected)?.classList.remove("selected");
+    this.selected = null; this.selectedItem = file;
+    element.classList.add("selected");
+  }
 
   async refresh(id = null) {
     const targets = id ? [this.nodes.get(id)] : [...this.nodes.values()].filter((node) => node.expanded && this.isVisible(node));

@@ -13,20 +13,26 @@ NodeFileManager は、実フォルダーを自由配置できるノードとし�
 ## 使い方
 
 1. **Select Folder** を押し、Windows のダイアログで実フォルダーを選択します。
-2. ノード左上の三角を押すと、直下のフォルダーと親子エッジが表示されます。
-3. ノードをドラッグして移動します。背景ドラッグでパン、ホイールでズームします。
-4. 配置、展開状態、パン、ズームは自動保存され、次回起動時に復元されます。
+2. ノード左上の三角を押すと、直下のフォルダー、親子エッジ、ノード内のファイルが表示されます。
+3. ファイルはダブルクリックで開きます。選択後に Rename / Copy / Move を使えます。別の表示中フォルダーノードへのドラッグは移動、Alt+ドラッグはコピーです。
+4. OS 側の変更は **Refresh** で再読み込みします。
+5. ノードをドラッグして移動します。背景ドラッグでパン、ホイールでズームします。
+6. 配置、展開状態、パン、ズームは自動保存され、次回起動時に現在のファイルシステムから復元されます。
 
 ## アーキテクチャと永続化
 
 - `frontend/`: HTML/CSS、ネイティブ ES Modules。DOM ノードと SVG エッジを描画
-- `backend/filesystem/`: ネイティブ選択ダイアログ、許可ルート、読み取り専用ディレクトリ一覧
+- `backend/filesystem/`: ネイティブ選択ダイアログ、許可ルート、一覧、open、名前変更／コピー／移動
 - `backend/workspace/`: UI 状態をローカル JSON に原子的に保存
 - `backend/server.py`: Python 標準ライブラリだけの localhost HTTP API と静的配信
 
-Windows では `%LOCALAPPDATA%\NodeFileManager\workspace.json`、その他では `~/.nodefilemanager/workspace.json` を使います。JSON は表示状態のみで、実フォルダーの内容を変更しません。詳細は [architecture.md](docs/architecture.md) を参照してください。
+Windows では `%LOCALAPPDATA%\NodeFileManager\workspace.json`、その他では `~/.nodefilemanager/workspace.json` を使います。JSON は表示状態だけを保存し、ファイル一覧は毎回ディスクから取得します。詳細は [architecture.md](docs/architecture.md) を参照してください。
 
 ## 社内 Windows PC での手動確認
+
+変異操作は必ず disposable なローカルテストフォルダーで実施してください。複数の子フォルダー、PDF、画像、テキスト／文書ファイルを用意し、展開、ファイルを開く、名前変更、コピー、Move、別ノードへのドラッグ移動（Alt でコピー）を順に確認します。OS 側でファイルを作成／削除して **Refresh** 後に表示が一致すること、終了・再起動後に配置と展開が戻りつつファイル一覧は現在のディスク内容になることも確認します。
+
+社内 PC では Defender/EDR の警告、ネットワークドライブ、OneDrive/SharePoint のポリシー差を記録し、同期領域での変異テストはローカル確認後だけ行ってください。
 
 1. Python 3.14 を導入し、`py -3.14 -m tkinter` で Tk ダイアログが開くことを確認します。
 2. `scripts\start.cmd` をダブルクリックし、ブラウザーが自動表示されることを確認します。
@@ -45,6 +51,8 @@ picker 回帰確認では、次も実施します。
 
 ## macOS picker 回帰確認
 
+macOS では `python3 -m backend.server` で起動し、上記 disposable フォルダーの一連の手順と、Finder の既定アプリで PDF、画像、文書が開くことを確認します。
+
 1. NodeFileManager を起動します。
 2. **Select Folder** を押します。
 3. キャンセルします。
@@ -62,4 +70,4 @@ picker 回帰確認では、次も実施します。
 
 ## 既知の制限
 
-フォルダーのみを一階層ずつ読み取ります。ファイル表示、変更操作、監視、検索、undo/redo、複数タブ、高度な自動配置は未実装です。Tk がない Python では選択できませんが、UI に明示的なエラーを表示します。同時に複数プロセスを起動する運用や巨大ディレクトリの性能は未調整です。
+ファイル監視、検索、undo/redo、複数タブ、高度な自動配置は未実装です。削除は標準ライブラリだけで各 OS のごみ箱へ確実に送る共通手段がないため、永久削除を避けて延期しています。Tk がない Python では選択できませんが、UI に明示的なエラーを表示します。同時に複数プロセスを起動する運用や巨大ディレクトリの性能は未調整です。

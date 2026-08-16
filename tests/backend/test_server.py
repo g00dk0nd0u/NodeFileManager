@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -181,6 +182,33 @@ class FilesystemAndWorkspaceTestCase(unittest.TestCase):
                 roots.remember(Path(outside))
             with self.assertRaises(PermissionError):
                 service.children("unknown-id")
+
+    def test_listing_is_one_lazy_scandir_and_one_parent_resolve(self) -> None:
+        with tempfile.TemporaryDirectory() as selected:
+            child = Path(selected, "Child"); child.mkdir()
+            Path(child, "deep").mkdir(); Path(selected, "ordinary.txt").write_text("file")
+            roots = RootRegistry(); service = DirectoryService(roots); root = service.select(selected)
+            original_resolve = Path.resolve
+            with patch("backend.filesystem.directory_service.os.scandir", wraps=os.scandir) as scandir, patch.object(
+                Path, "resolve", autospec=True,
+                side_effect=lambda path, strict=False: original_resolve(path, strict=strict),
+            ) as resolve:
+                contents = service.contents(str(root["id"]))
+            self.assertEqual(scandir.call_count, 1)
+            self.assertEqual(resolve.call_count, 1)
+            self.assertEqual(contents["folders"][0]["childrenState"], "unknown")
+
+    def test_listed_symlink_is_registered_lexically_but_checked_before_use(self) -> None:
+        with tempfile.TemporaryDirectory() as selected, tempfile.TemporaryDirectory() as outside:
+            link = Path(selected, "outside-link")
+            try:
+                link.symlink_to(Path(outside), target_is_directory=True)
+            except (NotImplementedError, OSError) as error:
+                self.skipTest(f"symlinks unavailable: {error}")
+            roots = RootRegistry(); service = DirectoryService(roots); root = service.select(selected)
+            contents = service.contents(str(root["id"])); item = (contents["folders"] + contents["files"])[0]
+            with self.assertRaises(PermissionError):
+                roots.path_for(str(item["id"]))
 
     def test_workspace_round_trip_and_missing_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

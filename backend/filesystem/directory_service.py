@@ -1,5 +1,6 @@
-"""Read-only directory metadata exposed to the frontend."""
+"""Lazy immediate-directory metadata exposed to the frontend."""
 
+import os
 from pathlib import Path
 
 from .roots import RootRegistry
@@ -8,13 +9,6 @@ from .roots import RootRegistry
 class DirectoryService:
     def __init__(self, roots: RootRegistry) -> None:
         self.roots = roots
-
-    @staticmethod
-    def _has_children(path: Path) -> bool:
-        try:
-            return any(path.iterdir())
-        except OSError:
-            return False
 
     def metadata(self, path: Path, parent_id: str | None = None) -> dict[str, object]:
         identifier = self.roots.remember(path)
@@ -26,7 +20,8 @@ class DirectoryService:
             "parentId": parent_id,
             "kind": kind,
             "extension": path.suffix if kind == "file" else "",
-            "hasChildren": self._has_children(path) if kind == "folder" else False,
+            "childrenState": "unknown" if kind == "folder" else "empty",
+            "hasChildren": kind == "folder",
         }
 
     def select(self, path: str) -> dict[str, object]:
@@ -36,17 +31,25 @@ class DirectoryService:
         parent = self.roots.get(parent_id)
         folders, files = [], []
         try:
-            entries = sorted(
-                parent.iterdir(), key=lambda entry: (not entry.is_dir(), entry.name.casefold()),
-            )
+            with os.scandir(parent) as scan:
+                entries = [(entry, entry.is_dir(follow_symlinks=False)) for entry in scan]
+            entries.sort(key=lambda item: (not item[1], item[0].name.casefold()))
         except OSError as error:
             raise PermissionError(f"Folder cannot be read: {error}") from error
-        for entry in entries:
-            try:
-                item = self.metadata(entry, parent_id)
-                (folders if item["kind"] == "folder" else files).append(item)
-            except OSError:
-                continue
+        for entry, is_folder in entries:
+            path = parent / entry.name
+            kind = "folder" if is_folder else "file"
+            item = {
+                "id": self.roots.remember_child(parent, entry.name),
+                "name": entry.name,
+                "path": str(path),
+                "parentId": parent_id,
+                "kind": kind,
+                "extension": "" if is_folder else path.suffix,
+                "childrenState": "unknown" if is_folder else "empty",
+                "hasChildren": is_folder,
+            }
+            (folders if is_folder else files).append(item)
         return {"folders": folders, "files": files}
 
     def children(self, parent_id: str) -> list[dict[str, object]]:

@@ -8,9 +8,15 @@ export class FolderCanvas {
     this.canvas = element; this.world = element.querySelector("#world"); this.edges = element.querySelector("#edges g");
     this.nodes = new Map(); this.elements = new Map(); this.viewport = { x: 0, y: 0, zoom: 1 };
     this.selected = null; this.selectedItem = null; this.onChange = onChange; this.loadChildren = loadChildren;
-    this.actions = {};
+    this.actions = {}; this.dragSession = null;
     this.canvas.addEventListener("pointerdown", (event) => this.startPan(event));
     this.canvas.addEventListener("wheel", (event) => this.zoom(event), { passive: false });
+    window.addEventListener("pointermove", (event) => this.continueDrag(event));
+    window.addEventListener("pointerup", (event) => this.endDrag(event));
+    window.addEventListener("pointercancel", (event) => this.cancelDrag(event));
+    window.addEventListener("blur", () => this.finishDrag(false));
+    this.canvas.addEventListener("lostpointercapture", (event) => this.cancelDrag(event), true);
+    document.addEventListener("keydown", (event) => { if (event.key === "Escape") this.escape(event); });
   }
 
   async restore(state, availableRoots) {
@@ -38,7 +44,7 @@ export class FolderCanvas {
     const parent = this.nodes.get(id);
     if (!saved?.expanded || !parent?.hasChildren) return;
     const contents = await this.loadChildren(id), children = contents.folders;
-    parent.files = contents.files;
+    parent.files = contents.files; parent.childrenState = contents.folders.length + contents.files.length ? "present" : "empty"; parent.hasChildren = parent.childrenState === "present";
     const positions = childPositions(parent, children.length);
     for (const [index, child] of children.entries()) {
       const savedChild = savedNodes[child.id];
@@ -90,27 +96,33 @@ export class FolderCanvas {
     const node = this.nodes.get(id);
     if (!node.expanded && !node.childrenLoaded) {
       const contents = await this.loadChildren(id), children = contents.folders;
-      node.files = contents.files;
+      node.files = contents.files; node.childrenState = children.length + contents.files.length ? "present" : "empty"; node.hasChildren = node.childrenState === "present";
       this.reconcileChildren(node, children);
       node.childrenLoaded = true;
     }
     node.expanded = !node.expanded; this.render(); this.changed();
   }
 
-  handlers() { return { toggle: (id) => this.toggle(id), drag: (event, id) => this.startDrag(event, id), selectFolder: (id) => { this.selected = id; this.selectedItem = null; this.render(); }, selectFile: (file, element) => this.selectFile(file, element), open: (id) => this.actions.open?.(id), rename: () => this.actions.rename?.(), drop: (event, id) => this.actions.transfer?.(event.dataTransfer.getData("application/x-nodefilemanager-item"), id, event.altKey) }; }
+  handlers() { return { toggle: (id) => this.toggle(id), drag: (event, id) => this.startDrag(event, id), selectFolder: (id) => this.selectFolder(id), selectFile: (file, element) => this.selectFile(file, element), open: (id) => this.actions.open?.(id), rename: () => this.actions.rename?.(), drop: (event, id) => this.actions.transfer?.(event.dataTransfer.getData("application/x-nodefilemanager-item"), id, event.altKey) }; }
+
+  selectFolder(id) { this.clearSelection(); this.selected = id; this.elements.get(id)?.classList.add("selected"); }
 
   selectFile(file, element) {
+    this.clearSelection(); this.selectedItem = file;
+    element.classList.add("selected");
+  }
+
+  clearSelection() {
     this.world.querySelector(".file-item.selected")?.classList.remove("selected");
     if (this.selected) this.elements.get(this.selected)?.classList.remove("selected");
-    this.selected = null; this.selectedItem = file;
-    element.classList.add("selected");
+    this.selected = null; this.selectedItem = null;
   }
 
   async refresh(id = null) {
     const targets = id ? [this.nodes.get(id)] : [...this.nodes.values()].filter((node) => this.isVisible(node));
     for (const node of targets.filter(Boolean)) {
       if (!this.nodes.has(node.id)) continue;
-      const contents = await this.loadChildren(node.id); node.hasChildren = contents.files.length + contents.folders.length > 0;
+      const contents = await this.loadChildren(node.id); node.childrenState = contents.files.length + contents.folders.length ? "present" : "empty"; node.hasChildren = node.childrenState === "present";
       if (node.expanded) {
         node.files = contents.files; this.reconcileChildren(node, contents.folders); node.childrenLoaded = true;
       } else {
@@ -144,12 +156,45 @@ export class FolderCanvas {
   }
 
   startDrag(event, id) {
-    if (event.button !== 0) return;
-    event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); this.selected = id;
-    const node = this.nodes.get(id), startX = event.clientX, startY = event.clientY, originX = node.x, originY = node.y;
-    const move = (moveEvent) => { node.x = originX + (moveEvent.clientX - startX) / this.viewport.zoom; node.y = originY + (moveEvent.clientY - startY) / this.viewport.zoom; this.render(); };
-    const end = () => { event.currentTarget.removeEventListener("pointermove", move); this.changed(); };
-    event.currentTarget.addEventListener("pointermove", move); event.currentTarget.addEventListener("pointerup", end, { once: true }); this.render();
+    if (event.button !== 0 || event.target.closest("button, .file-item")) return;
+    this.finishDrag(false); event.stopPropagation();
+    const node = this.nodes.get(id); if (!node) return;
+    this.dragSession = { pointerId: event.pointerId, nodeId: id, element: event.currentTarget, startX: event.clientX, startY: event.clientY, originX: node.x, originY: node.y, dragging: false };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  continueDrag(event) {
+    const session = this.dragSession; if (!session || session.pointerId !== event.pointerId) return;
+    const dx = event.clientX - session.startX, dy = event.clientY - session.startY;
+    if (!session.dragging && Math.hypot(dx, dy) < 5) return;
+    if (!session.dragging) { session.dragging = true; this.selectFolder(session.nodeId); }
+    const node = this.nodes.get(session.nodeId); if (!node) { this.finishDrag(false); return; }
+    node.x = session.originX + dx / this.viewport.zoom; node.y = session.originY + dy / this.viewport.zoom; this.render();
+  }
+
+  endDrag(event) {
+    const session = this.dragSession; if (!session || session.pointerId !== event.pointerId) return;
+    const wasDragging = session.dragging, nodeId = session.nodeId; this.finishDrag(true);
+    if (!wasDragging) this.selectFolder(nodeId);
+  }
+
+  cancelDrag(event) { if (this.dragSession?.pointerId === event.pointerId) this.finishDrag(false); }
+
+  finishDrag(savePosition) {
+    const session = this.dragSession; if (!session) return;
+    this.dragSession = null;
+    if (session.element.hasPointerCapture?.(session.pointerId)) session.element.releasePointerCapture(session.pointerId);
+    if (savePosition && session.dragging) this.changed();
+    else if (session.dragging) {
+      const node = this.nodes.get(session.nodeId);
+      if (node) { node.x = session.originX; node.y = session.originY; this.render(); }
+    }
+  }
+
+  escape(event) {
+    const active = this.dragSession || this.selected || this.selectedItem || this.actions.dialogOpen?.();
+    this.finishDrag(false); this.clearSelection(); this.actions.cancelDialog?.();
+    if (active) event.preventDefault();
   }
 
   startPan(event) {

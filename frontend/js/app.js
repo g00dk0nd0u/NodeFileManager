@@ -42,6 +42,8 @@ destinationDialog.addEventListener("close", () => {
   if (!transfer?.destinationIds.has(destinationId)) { status.textContent = "有効な移動先が選択されていません"; return; }
   canvas.actions.transfer(transfer.itemId, destinationId, transfer.copy);
 });
+canvas.actions.dialogOpen = () => destinationDialog.open;
+canvas.actions.cancelDialog = () => { if (destinationDialog.open) destinationDialog.close("cancel"); };
 
 try {
   await getHealth();

@@ -2,11 +2,11 @@ export function createNodeElement(node, handlers) {
   const element = document.createElement("article");
   element.className = "folder-node";
   element.dataset.id = node.id;
-  element.innerHTML = `<div class="node-title"><button class="node-toggle" type="button" aria-label="展開">${node.hasChildren ? (node.expanded ? "▾" : "▸") : "·"}</button><span></span></div><div class="node-path"></div><div class="node-files"></div>`;
+  element.innerHTML = `<div class="node-title"><button class="node-toggle" type="button" aria-label="展開">${node.expanded ? "▾" : (node.childrenState === "empty" ? "·" : "▸")}</button><span></span></div><div class="node-path"></div><div class="node-files"></div>`;
   element.querySelector("span").textContent = node.name;
   element.querySelector(".node-path").textContent = node.path;
   element.querySelector(".node-path").title = node.path;
-  element.querySelector("button").addEventListener("click", (event) => { event.stopPropagation(); if (node.hasChildren) handlers.toggle(node.id); });
+  element.querySelector("button").addEventListener("click", (event) => { event.stopPropagation(); if (node.expanded || node.childrenState !== "empty") handlers.toggle(node.id); });
   element.addEventListener("pointerdown", (event) => handlers.drag(event, node.id));
   element.addEventListener("contextmenu", (event) => { if (!event.target.closest(".file-item")) { event.preventDefault(); handlers.selectFolder(node.id); handlers.rename(); } });
   element.addEventListener("dragover", (event) => { if (event.dataTransfer.types.includes("application/x-nodefilemanager-item")) { event.preventDefault(); element.classList.add("drop-target"); } });
@@ -18,7 +18,7 @@ export function createNodeElement(node, handlers) {
 export function updateNodeElement(element, node, selected, selectedItem, handlers) {
   element.style.transform = `translate(${node.x}px, ${node.y}px)`;
   element.classList.toggle("selected", selected);
-  element.querySelector(".node-toggle").textContent = node.hasChildren ? (node.expanded ? "▾" : "▸") : "·";
+  element.querySelector(".node-toggle").textContent = node.expanded ? "▾" : (node.childrenState === "empty" ? "·" : "▸");
   const list = element.querySelector(".node-files");
   list.hidden = !node.expanded;
   list.replaceChildren(...(node.expanded ? (node.files || []).map((file) => {

@@ -15,6 +15,10 @@ def folder_id(path: Path) -> str:
 item_id = folder_id
 
 
+def lexical_item_id(path: Path) -> str:
+    return hashlib.sha256(str(path.absolute()).casefold().encode("utf-8")).hexdigest()[:24]
+
+
 class RootRegistry:
     def __init__(self) -> None:
         self._roots: set[Path] = set()
@@ -38,6 +42,18 @@ class RootRegistry:
             identifier = folder_id(resolved)
             self._folders[identifier] = resolved
             return identifier
+
+    def remember_child(self, parent: Path, name: str) -> str:
+        """Register an immediate lexical child without resolving it on the listing path."""
+        if not name or Path(name).name != name or name in {".", ".."}:
+            raise ValueError("Invalid child name")
+        child = parent / name
+        identifier = lexical_item_id(child)
+        with self._lock:
+            if parent not in self._roots and not any(root in parent.parents for root in self._roots):
+                raise PermissionError("Parent folder is outside the selected roots")
+            self._folders[identifier] = child
+        return identifier
 
     def path_for(self, identifier: str) -> Path:
         """Return an existing authorized item, rejecting stale IDs and symlink escapes."""

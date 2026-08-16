@@ -35,6 +35,14 @@ class FileOperationsTestCase(unittest.TestCase):
         for name in ("", "../escape", "bad/name", "bad\\name"):
             with self.subTest(name=name), self.assertRaises(FileOperationError): self.operations.rename(str(renamed["id"]), name)
 
+    def test_case_only_rename_succeeds_and_real_collision_is_rejected(self):
+        case_item = self.operations.rename(str(self.file_item["id"]), "Report.txt")
+        renamed = self.operations.rename(str(case_item["id"]), "report.txt")
+        self.assertEqual(Path(str(renamed["path"])).name, "report.txt")
+        (self.source / "occupied.txt").write_text("collision")
+        with self.assertRaises(FileExistsError):
+            self.operations.rename(str(renamed["id"]), "occupied.txt")
+
     def test_copy_move_collisions_and_recursive_copy(self):
         copied = self.operations.copy(str(self.file_item["id"]), str(self.destination_item["id"])); self.assertEqual(Path(str(copied["path"])).read_text(), "content")
         with self.assertRaises(FileExistsError): self.operations.copy(str(self.file_item["id"]), str(self.destination_item["id"]))
@@ -43,6 +51,24 @@ class FileOperationsTestCase(unittest.TestCase):
         nested = self.source / "nested"; nested.mkdir(); nested_item = self.directories.metadata(nested, str(self.source_item["id"]))
         with self.assertRaises(FileOperationError): self.operations.copy(str(self.source_item["id"]), str(nested_item["id"]))
         with self.assertRaises(PermissionError): self.operations.move("../../outside", str(self.destination_item["id"]))
+
+    def test_folder_copy_rejects_symlink_before_creating_destination(self):
+        with tempfile.TemporaryDirectory() as outside:
+            external = Path(outside, "external"); external.mkdir(); Path(external, "secret.txt").write_text("secret")
+            link = self.source / "external-link"
+            try:
+                link.symlink_to(external, target_is_directory=True)
+            except (NotImplementedError, OSError) as error:
+                self.skipTest(f"symlinks unavailable: {error}")
+            with self.assertRaisesRegex(FileOperationError, "filesystem links"):
+                self.operations.copy(str(self.source_item["id"]), str(self.destination_item["id"]))
+            self.assertFalse((self.destination / self.source.name).exists())
+
+    def test_folder_copy_rejects_junction_check(self):
+        with patch.object(Path, "is_junction", return_value=True):
+            with self.assertRaisesRegex(FileOperationError, "filesystem links"):
+                self.operations.copy(str(self.source_item["id"]), str(self.destination_item["id"]))
+        self.assertFalse((self.destination / self.source.name).exists())
 
     def test_opener_accepts_only_authorized_existing_files(self):
         opener = FileOpener(self.roots)

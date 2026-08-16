@@ -91,8 +91,7 @@ export class FolderCanvas {
     if (!node.expanded && !node.childrenLoaded) {
       const contents = await this.loadChildren(id), children = contents.folders;
       node.files = contents.files;
-      const positions = childPositions(node, children.length);
-      children.forEach((child, index) => { if (!this.nodes.has(child.id)) this.nodes.set(child.id, { ...child, ...positions[index], expanded: false, childrenLoaded: false }); });
+      this.reconcileChildren(node, children);
       node.childrenLoaded = true;
     }
     node.expanded = !node.expanded; this.render(); this.changed();
@@ -108,17 +107,29 @@ export class FolderCanvas {
   }
 
   async refresh(id = null) {
-    const targets = id ? [this.nodes.get(id)] : [...this.nodes.values()].filter((node) => node.expanded && this.isVisible(node));
+    const targets = id ? [this.nodes.get(id)] : [...this.nodes.values()].filter((node) => this.isVisible(node));
     for (const node of targets.filter(Boolean)) {
       if (!this.nodes.has(node.id)) continue;
-      const contents = await this.loadChildren(node.id); node.files = contents.files; node.hasChildren = contents.files.length + contents.folders.length > 0;
-      const currentChildren = [...this.nodes.values()].filter((child) => child.parentId === node.id);
-      const incoming = new Set(contents.folders.map((child) => child.id));
-      currentChildren.filter((child) => !incoming.has(child.id)).forEach((child) => this.removeBranch(child.id));
-      const positions = childPositions(node, contents.folders.length);
-      contents.folders.forEach((child, index) => { if (!this.nodes.has(child.id)) this.nodes.set(child.id, { ...child, ...positions[index], expanded: false, childrenLoaded: false }); });
+      const contents = await this.loadChildren(node.id); node.hasChildren = contents.files.length + contents.folders.length > 0;
+      if (node.expanded) {
+        node.files = contents.files; this.reconcileChildren(node, contents.folders); node.childrenLoaded = true;
+      } else {
+        node.files = []; node.childrenLoaded = false;
+      }
     }
     this.render(); this.changed();
+  }
+
+  reconcileChildren(node, children) {
+    const current = [...this.nodes.values()].filter((child) => child.parentId === node.id);
+    const incoming = new Set(children.map((child) => child.id));
+    current.filter((child) => !incoming.has(child.id)).forEach((child) => this.removeBranch(child.id));
+    const positions = childPositions(node, children.length);
+    children.forEach((child, index) => {
+      const existing = this.nodes.get(child.id);
+      if (existing) Object.assign(existing, child);
+      else this.nodes.set(child.id, { ...child, ...positions[index], expanded: false, childrenLoaded: false });
+    });
   }
 
   removeBranch(id) { for (const child of [...this.nodes.values()].filter((item) => item.parentId === id)) this.removeBranch(child.id); this.nodes.delete(id); }

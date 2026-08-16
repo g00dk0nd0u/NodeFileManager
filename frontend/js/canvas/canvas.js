@@ -27,17 +27,16 @@ export class FolderCanvas {
         ...root,
         x: saved?.x ?? index * 220,
         y: saved?.y ?? 80,
-        expanded: true,
         childrenLoaded: false,
       });
     }
     this.render();
-    for (const root of availableRoots) await this.restoreExpanded(root.id, savedNodes);
+    for (const root of availableRoots) await this.restoreMaterialized(root.id, savedNodes);
     this.render(); for (const root of availableRoots) this.layoutTree(root.id); this.render();
     this.changed();
   }
 
-  async restoreExpanded(id, savedNodes) {
+  async restoreMaterialized(id, savedNodes) {
     const saved = savedNodes[id];
     const parent = this.nodes.get(id);
     if (!parent) return;
@@ -45,15 +44,15 @@ export class FolderCanvas {
     parent.files = contents.files; parent.folders = children; parent.childrenLoaded = true;
     for (const child of children) {
       const savedChild = savedNodes[child.id]; if (!savedChild) continue;
-      this.nodes.set(child.id, { ...child, x: savedChild.x, y: savedChild.y, expanded: true, childrenLoaded: false });
-      await this.restoreExpanded(child.id, savedNodes);
+      this.nodes.set(child.id, { ...child, x: savedChild.x, y: savedChild.y, childrenLoaded: false });
+      await this.restoreMaterialized(child.id, savedNodes);
     }
   }
 
   async addRoot(folder) {
     if (!this.nodes.has(folder.id)) {
       const center = this.screenToWorld(this.canvas.clientWidth / 2, this.canvas.clientHeight / 3);
-      this.nodes.set(folder.id, { ...folder, expanded: true, childrenLoaded: false, x: center.x - 120, y: center.y });
+      this.nodes.set(folder.id, { ...folder, childrenLoaded: false, x: center.x - 120, y: center.y });
     }
     const node = this.nodes.get(folder.id); await this.loadNode(node); this.selected = folder.id; this.render(); this.changed();
   }
@@ -62,7 +61,7 @@ export class FolderCanvas {
     let current = node;
     while (current.parentId) {
       const parent = this.nodes.get(current.parentId);
-      if (!parent || !parent.expanded) return false;
+      if (!parent) return false;
       current = parent;
     }
     return true;
@@ -90,12 +89,12 @@ export class FolderCanvas {
 
   async openChild(parentId, folder) {
     if (this.nodes.has(folder.id)) { this.removeBranch(folder.id); this.render(); this.layoutTree(parentId); this.render(); this.changed(); return; }
-    const parent = this.nodes.get(parentId); const child = { ...folder, parentId, expanded: true, childrenLoaded: false, x: parent.x, y: parent.y + 160 };
+    const parent = this.nodes.get(parentId); const child = { ...folder, parentId, childrenLoaded: false, x: parent.x, y: parent.y + 160 };
     this.nodes.set(folder.id, child); await this.loadNode(child); this.render(); this.layoutTree(parentId); this.render(); this.changed();
   }
 
   layoutTree(parentId) {
-    const parent = this.nodes.get(parentId), children = [...this.nodes.values()].filter((node) => node.parentId === parentId); if (!parent || !children.length) return;
+    const parent = this.nodes.get(parentId), children = [...this.nodes.values()].filter((node) => node.parentId === parentId).sort((left, right) => left.x - right.x); if (!parent || !children.length) return;
     const height = this.elements.get(parentId)?.offsetHeight || 80, y = parent.y + height;
     if (children.length === 1) { children[0].x = parent.x; children[0].y = y; this.layoutTree(children[0].id); return; }
     const width = 240, gap = 8, start = parent.x + width / 2 - (children.length * width + (children.length - 1) * gap) / 2;
@@ -134,11 +133,7 @@ export class FolderCanvas {
       if (node.preview && !contents.files.some((file) => file.id === node.preview.id)) delete node.preview;
       const availableFolders = new Set(contents.folders.map((folder) => folder.id));
       [...this.nodes.values()].filter((child) => child.parentId === node.id && !availableFolders.has(child.id)).forEach((child) => this.removeBranch(child.id));
-      if (node.expanded) {
-        node.files = contents.files; node.folders = contents.folders; node.childrenLoaded = true;
-      } else {
-        node.files = []; node.childrenLoaded = false;
-      }
+      node.files = contents.files; node.folders = contents.folders; node.childrenLoaded = true;
     }
     this.render(); for (const root of [...this.nodes.values()].filter((node) => !node.parentId)) this.layoutTree(root.id); this.render(); this.changed();
   }
@@ -146,12 +141,14 @@ export class FolderCanvas {
   removeBranch(id) { for (const child of [...this.nodes.values()].filter((item) => item.parentId === id)) this.removeBranch(child.id); this.nodes.delete(id); }
   visibleFolders() { return [...this.nodes.values()].filter((node) => this.isVisible(node)); }
 
-  applyRename(oldId, item) {
+  async applyRename(oldId, item) {
     if (item.kind === "file") return;
     const previous = this.nodes.get(oldId); if (!previous) return;
+    const parentId = previous.parentId;
     this.removeBranch(oldId); this.elements.get(oldId)?.remove(); this.elements.delete(oldId);
-    this.nodes.set(item.id, { ...previous, ...item, expanded: false, childrenLoaded: false, files: [] });
-    this.selected = item.id; this.render(); this.changed();
+    const renamed = { ...previous, ...item, childrenLoaded: false, folders: [], files: [] }; delete renamed.preview;
+    this.nodes.set(item.id, renamed); await this.loadNode(renamed);
+    this.selected = item.id; this.render(); if (parentId) this.layoutTree(parentId); else this.layoutTree(item.id); this.render(); this.changed();
   }
 
   startDrag(event, id) {

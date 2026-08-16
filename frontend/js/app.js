@@ -16,7 +16,7 @@ canvas.actions.open = async (id) => { try { await openFile(id); status.textConte
 canvas.actions.rename = async () => {
   const item = canvas.selectedItem || canvas.nodes.get(canvas.selected); if (!item) return;
   const name = prompt("新しい名前（同じフォルダー内）", item.name); if (name === null || name === item.name) return;
-  try { const result = await renameItem(item.id, name); canvas.applyRename(item.id, result.item); canvas.selectedItem = null; await refresh(); } catch (error) { showError(error); }
+  try { const result = await renameItem(item.id, name); await canvas.applyRename(item.id, result.item); canvas.selectedItem = null; await refresh(); } catch (error) { showError(error); }
 };
 canvas.actions.transfer = async (id, destinationId, copy = false) => { try { const sourceId = canvas.selectedItem?.parentId; await (copy ? copyItem : moveItem)(id, destinationId); canvas.clearSelection(); if (sourceId) await canvas.refresh(sourceId); if (destinationId !== sourceId && canvas.nodes.has(destinationId)) await canvas.refresh(destinationId); status.textContent = copy ? "コピーしました" : "移動しました"; } catch (error) { showError(error); } };
 

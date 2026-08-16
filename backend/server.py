@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from backend.filesystem import folder_picker
@@ -25,6 +26,33 @@ ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 ALLOWED_ORIGINS = {f"http://{host}" for host in ALLOWED_HOSTS}
 
 
+class ApplicationLifecycle:
+    """Race-safe gate between filesystem mutations and packaged shutdown."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._active_mutations = 0
+        self._quitting = False
+
+    def begin_mutation(self) -> bool:
+        with self._lock:
+            if self._quitting:
+                return False
+            self._active_mutations += 1
+            return True
+
+    def end_mutation(self) -> None:
+        with self._lock:
+            self._active_mutations -= 1
+
+    def begin_quit(self) -> bool:
+        with self._lock:
+            if self._active_mutations:
+                return False
+            self._quitting = True
+            return True
+
+
 class NodeFileManagerHandler(SimpleHTTPRequestHandler):
     """Serve the frontend and explicit filesystem/workspace APIs."""
 
@@ -37,6 +65,7 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
     picker = staticmethod(folder_picker.select_folder)
     picker_lock = threading.Lock()
     application_server: ThreadingHTTPServer | None = None
+    lifecycle = ApplicationLifecycle()
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, directory=str(FRONTEND_DIRECTORY), **kwargs)
@@ -130,6 +159,11 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
         if path == "/api/application/quit":
             if not is_packaged():
                 self._json(409, {"error": "Use Ctrl+C to stop a source launch."})
+            elif not self.lifecycle.begin_quit():
+                self._json(409, {
+                    "code": "operation_in_progress",
+                    "error": "A filesystem operation is still in progress.",
+                })
             else:
                 self._json(200, {"stopping": True})
                 if self.application_server is not None:
@@ -153,6 +187,10 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
                 self._operation_error(error)
             return
         if path in {"/api/files/open", "/api/items/copy", "/api/items/move", "/api/folders/create"}:
+            is_mutation = path != "/api/files/open"
+            if is_mutation and not self.lifecycle.begin_mutation():
+                self._json(409, {"code": "application_quitting", "error": "NodeFileManager is shutting down."})
+                return
             try:
                 body = self._read_json()
                 identifier = str(body.get("id", ""))
@@ -167,6 +205,9 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
                     self._json(200, {"item": operation(identifier, destination_id)})
             except (ValueError, OSError, PermissionError) as error:
                 self._operation_error(error)
+            finally:
+                if is_mutation:
+                    self.lifecycle.end_mutation()
             return
         if path != "/api/folders/select":
             self.send_error(404, "API endpoint not found")
@@ -208,12 +249,17 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
         if urlsplit(self.path).path != "/api/items/rename":
             self.send_error(404, "API endpoint not found")
             return
+        if not self.lifecycle.begin_mutation():
+            self._json(409, {"code": "application_quitting", "error": "NodeFileManager is shutting down."})
+            return
         try:
             body = self._read_json()
             item = self.operations.rename(str(body.get("id", "")), body.get("name"))
             self._json(200, {"item": item})
         except (ValueError, OSError, PermissionError) as error:
             self._operation_error(error)
+        finally:
+            self.lifecycle.end_mutation()
 
     do_DELETE = lambda self: self._reject_state_change()  # noqa: E731
 
@@ -241,6 +287,7 @@ def health_response() -> dict[str, object]:
 
 
 def create_server(host: str = HOST, port: int = PORT) -> ThreadingHTTPServer:
+    NodeFileManagerHandler.lifecycle = ApplicationLifecycle()
     server = ThreadingHTTPServer((host, port), NodeFileManagerHandler)
     NodeFileManagerHandler.application_server = server
     return server

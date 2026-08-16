@@ -14,9 +14,9 @@ from unittest.mock import patch
 
 from backend.filesystem import folder_picker
 from backend.filesystem.directory_service import DirectoryService
-from backend.filesystem.roots import RootRegistry
+from backend.filesystem.roots import RootRegistry, folder_id
 from backend.filesystem.folder_picker import FolderPickerUnavailable
-from backend.server import HOST, NodeFileManagerHandler, ThreadingHTTPServer
+from backend.server import ApplicationLifecycle, HOST, NodeFileManagerHandler, ThreadingHTTPServer
 from backend.workspace.store import WorkspaceStore
 
 
@@ -32,6 +32,10 @@ class ServerTestCase(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
         cls.thread.join()
+
+    def setUp(self) -> None:
+        NodeFileManagerHandler.lifecycle = ApplicationLifecycle()
+        NodeFileManagerHandler.application_server = None
 
     def request(
         self,
@@ -68,6 +72,47 @@ class ServerTestCase(unittest.TestCase):
         status, body = self.request("GET", "/")
         self.assertEqual(status, 200)
         self.assertIn(b"<h1>NodeFileManager</h1>", body)
+
+    def test_saved_materialized_node_is_restored_and_reauthorized(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory, "root"); root.mkdir()
+            child = root / "saved-node"; child.mkdir()
+            store = WorkspaceStore(Path(directory, "workspace.json"))
+            state = {
+                "version": 1, "roots": [{"path": str(root)}],
+                "nodes": {"saved": {"path": str(child)}},
+                "viewport": {"x": 0, "y": 0, "zoom": 1},
+            }
+            store.save(state)
+            roots = RootRegistry()
+            directories = DirectoryService(roots)
+            with patch.object(NodeFileManagerHandler, "workspace", store), patch.object(NodeFileManagerHandler, "roots", roots), patch.object(NodeFileManagerHandler, "directories", directories):
+                status, body = self.request("GET", "/api/workspace")
+                self.assertEqual(status, 200)
+                self.assertEqual(json.loads(body)["state"], state)
+                self.assertEqual(roots.path_for(folder_id(child)), child.resolve())
+
+    def test_packaged_quit_is_rejected_during_mutation(self) -> None:
+        self.assertTrue(NodeFileManagerHandler.lifecycle.begin_mutation())
+        try:
+            with patch("backend.server.is_packaged", return_value=True):
+                status, body = self.request("POST", "/api/application/quit", origin="http://127.0.0.1:8000", body={})
+            self.assertEqual(status, 409)
+            self.assertEqual(json.loads(body)["code"], "operation_in_progress")
+        finally:
+            NodeFileManagerHandler.lifecycle.end_mutation()
+
+    def test_packaged_quit_is_accepted_when_idle(self) -> None:
+        with patch("backend.server.is_packaged", return_value=True):
+            status, body = self.request("POST", "/api/application/quit", origin="http://127.0.0.1:8000", body={})
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body)["stopping"])
+        self.assertFalse(NodeFileManagerHandler.lifecycle.begin_mutation())
+
+    def test_source_quit_remains_rejected(self) -> None:
+        status, body = self.request("POST", "/api/application/quit", origin="http://127.0.0.1:8000", body={})
+        self.assertEqual(status, 409)
+        self.assertIn("Ctrl+C", json.loads(body)["error"])
 
     def test_invalid_host_is_rejected(self) -> None:
         status, _ = self.request("GET", "/api/health", host="attacker.example")

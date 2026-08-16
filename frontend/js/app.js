@@ -43,7 +43,11 @@ try {
   const health = await getHealth();
   document.querySelector("#build-identity").textContent = `v${health.version} · ${health.packaged ? "packaged" : "source"}${health.commit !== "unknown" ? ` · ${health.commit.slice(0, 8)}` : ""}`;
   const quit = document.querySelector("#quit");
-  if (health.packaged) { quit.hidden = false; quit.addEventListener("click", async () => { status.textContent = "終了しています…"; await quitApplication(); }); }
+  if (health.packaged) { quit.hidden = false; quit.addEventListener("click", async () => {
+    status.textContent = "ワークスペースを保存しています…";
+    try { await save.flush(); status.textContent = "終了しています…"; await quitApplication(); }
+    catch (error) { showError(error); }
+  }); }
   status.textContent = await restoreWorkspace(canvas);
 } catch (error) { showError(error); }
 

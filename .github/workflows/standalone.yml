@@ -13,25 +13,42 @@ jobs:
         include:
           - os: windows-2025
             artifact: NodeFileManager-windows-x64
-            executable: dist/NodeFileManager/NodeFileManager.exe
+            extracted_executable: NodeFileManager/NodeFileManager.exe
           - os: macos-15-intel
             artifact: NodeFileManager-macos-x64
-            executable: dist/NodeFileManager.app/Contents/MacOS/NodeFileManager
+            extracted_executable: NodeFileManager.app/Contents/MacOS/NodeFileManager
     runs-on: ${{ matrix.os }}
     env:
-      NODEFILEMANAGER_BUILD_COMMIT: ${{ github.sha }}
+      BUILD_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+      NODEFILEMANAGER_BUILD_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
       - run: python -m pip install -r requirements-build.txt
       - run: python -m unittest discover -s tests/backend
       - run: python scripts/build_standalone.py
-      - name: Packaged health smoke test
+      - name: Extract distributable archive
         shell: bash
         run: |
-          "${{ matrix.executable }}" --no-browser &
+          extracted="$RUNNER_TEMP/nodefilemanager-smoke"
+          rm -rf "$extracted"
+          mkdir -p "$extracted"
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            /usr/bin/ditto -x -k "dist/${{ matrix.artifact }}.zip" "$extracted"
+            codesign --verify --deep --strict "$extracted/NodeFileManager.app"
+          else
+            python -c 'import pathlib, sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(pathlib.Path(sys.argv[2]))' "dist/${{ matrix.artifact }}.zip" "$extracted"
+          fi
+      - name: Extracted ZIP health smoke test
+        shell: bash
+        run: |
+          executable="$RUNNER_TEMP/nodefilemanager-smoke/${{ matrix.extracted_executable }}"
+          if [[ "$RUNNER_OS" == "macOS" ]]; then test -x "$executable"; else test -f "$executable"; fi
+          "$executable" --no-browser &
           pid=$!
           trap 'kill "$pid" 2>/dev/null || true' EXIT
           python - <<'PY'
@@ -54,6 +71,6 @@ jobs:
           trap - EXIT
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}-${{ github.sha }}
+          name: ${{ matrix.artifact }}-${{ env.BUILD_COMMIT }}
           path: dist/${{ matrix.artifact }}.zip
           if-no-files-found: error

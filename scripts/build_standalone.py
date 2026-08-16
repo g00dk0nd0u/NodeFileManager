@@ -40,7 +40,14 @@ def main() -> int:
     else:
         print("Standalone artifacts are currently supported on Windows and macOS only.", file=sys.stderr)
         return 2
-    archive = shutil.make_archive(str(dist / stem), "zip", root_dir=source.parent, base_dir=source.name)
+    if sys.platform == "darwin":
+        archive = str(dist / f"{stem}.zip")
+        subprocess.run([
+            "/usr/bin/ditto", "-c", "-k", "--sequesterRsrc", "--keepParent",
+            str(source), archive,
+        ], check=True)
+    else:
+        archive = shutil.make_archive(str(dist / stem), "zip", root_dir=source.parent, base_dir=source.name)
     print(f"Standalone artifact: {archive}")
     return 0
 

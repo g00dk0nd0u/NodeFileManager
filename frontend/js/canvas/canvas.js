@@ -107,7 +107,7 @@ export class FolderCanvas {
     for (const [id, node] of this.nodes) {
       node.favorite = paths.has(locationKey(node.path));
       const button = this.elements.get(id)?.querySelector(".node-favorite");
-      if (button) button.textContent = node.favorite ? "★" : "☆";
+      if (button) { button.classList.toggle("is-active", node.favorite); button.setAttribute("aria-pressed", String(node.favorite)); }
     }
   }
 

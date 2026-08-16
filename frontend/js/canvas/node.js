@@ -7,11 +7,12 @@ function modifiedTime(timestamp) {
 export function createNodeElement(node, handlers) {
   const element = document.createElement("article");
   element.className = "folder-node"; element.dataset.id = node.id;
-  element.innerHTML = `<div class="node-title"><button class="node-close" type="button" aria-label="閉じる">×</button><span></span><button class="node-new-folder" type="button" aria-label="新しいフォルダー">＋</button></div><div class="node-path"></div><div class="node-contents"></div><div class="node-preview"></div>`;
+  element.innerHTML = `<div class="node-title"><button class="node-close" type="button" aria-label="閉じる">×</button><span></span><button class="node-favorite" type="button" aria-label="お気に入りを切り替える">☆</button><button class="node-new-folder" type="button" aria-label="新しいフォルダー">＋</button></div><div class="node-path"></div><div class="node-contents"></div><div class="node-preview"></div>`;
   element.querySelector("span").textContent = node.name;
   element.querySelector(".node-path").textContent = node.path; element.querySelector(".node-path").title = node.path;
   element.querySelector(".node-close").addEventListener("click", (event) => { event.stopPropagation(); handlers.close(node.id); });
   element.querySelector(".node-new-folder").addEventListener("click", (event) => { event.stopPropagation(); handlers.newFolder(node.id); });
+  element.querySelector(".node-favorite").addEventListener("click", (event) => { event.stopPropagation(); handlers.favorite(node.id); });
   element.addEventListener("pointerdown", (event) => handlers.drag(event, node.id));
   element.addEventListener("contextmenu", (event) => { if (!event.target.closest(".folder-item, .file-item")) { event.preventDefault(); handlers.selectFolder(node.id); handlers.rename(); } });
   element.addEventListener("dragover", (event) => { if (event.dataTransfer.types.includes("application/x-nodefilemanager-item")) { event.preventDefault(); element.classList.add("drop-target"); } });
@@ -22,6 +23,7 @@ export function createNodeElement(node, handlers) {
 
 export function updateNodeElement(element, node, selected, selectedItem, openFolders, handlers) {
   element.style.transform = `translate(${node.x}px, ${node.y}px)`; element.classList.toggle("selected", selected);
+  element.querySelector(".node-favorite").textContent = node.favorite ? "★" : "☆";
   const contents = element.querySelector(".node-contents");
   const folderRows = (node.folders || []).map((folder) => {
     const row = document.createElement("div"); row.className = "folder-item"; row.dataset.id = folder.id;

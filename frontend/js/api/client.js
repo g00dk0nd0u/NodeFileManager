@@ -18,3 +18,10 @@ export const moveItem = (id, destinationId) => request("/api/items/move", { meth
 export const createFolder = (parentId, name) => request("/api/folders/create", { method: "POST", body: JSON.stringify({ parentId, name }) });
 export const loadWorkspace = () => request("/api/workspace");
 export const saveWorkspace = (state) => request("/api/workspace", { method: "PUT", body: JSON.stringify(state) });
+export const getNavigation = () => request("/api/navigation");
+export const toggleFavorite = (id) => request("/api/navigation/favorites/toggle", { method: "POST", body: JSON.stringify({ id }) });
+export const removeFavorite = (entryId) => request("/api/navigation/favorites/remove", { method: "POST", body: JSON.stringify({ entryId }) });
+export const openNavigation = (entryId) => request("/api/navigation/open", { method: "POST", body: JSON.stringify({ entryId }) });
+export const visitFolder = (id) => request("/api/navigation/visit", { method: "POST", body: JSON.stringify({ id }) });
+export const searchNames = (query) => request(`/api/navigation/search?q=${encodeURIComponent(query)}`);
+export const activateSearch = (id) => request("/api/navigation/search/activate", { method: "POST", body: JSON.stringify({ id }) });

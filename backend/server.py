@@ -15,6 +15,8 @@ from backend.filesystem.folder_browser import FolderBrowser
 from backend.filesystem.opener import FileOpener
 from backend.filesystem.operations import FileOperationError, FileOperations
 from backend.filesystem.roots import RootRegistry
+from backend.navigation.search import NavigationSearch
+from backend.navigation.service import NavigationService
 from backend.workspace.store import WorkspaceStore
 from backend.runtime_paths import frontend_directory, is_packaged
 from backend.version import BUILD_COMMIT, VERSION
@@ -58,7 +60,9 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
 
     roots = RootRegistry()
     directories = DirectoryService(roots)
-    operations = FileOperations(roots, directories)
+    navigation = NavigationService(roots, directories)
+    search = NavigationSearch(roots, directories)
+    operations = FileOperations(roots, directories, navigation.migrate)
     folder_browser = FolderBrowser(directories)
     opener = FileOpener(roots)
     workspace = WorkspaceStore()
@@ -138,6 +142,13 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
                 except (OSError, KeyError, TypeError, PermissionError):
                     continue
             self._json(200, {"state": state, "availableRoots": available})
+        elif request.path == "/api/navigation":
+            self._json(200, self.navigation.state())
+        elif request.path == "/api/navigation/search":
+            try:
+                self._json(200, self.search.search(parse_qs(request.query).get("q", [""])[0]))
+            except ValueError as error:
+                self._json(400, {"error": str(error)})
         elif request.path.startswith("/api/"):
             self.send_error(404, "API endpoint not found")
         else:
@@ -169,6 +180,22 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
                 if self.application_server is not None:
                     threading.Thread(target=self.application_server.shutdown, daemon=True).start()
             return
+        if path.startswith("/api/navigation/"):
+            try:
+                body = self._read_json()
+                if path == "/api/navigation/favorites/toggle": result = self.navigation.toggle(str(body.get("id", "")))
+                elif path == "/api/navigation/favorites/remove": result = self.navigation.remove(str(body.get("entryId", "")))
+                elif path == "/api/navigation/open": result = self.navigation.open(str(body.get("entryId", "")))
+                elif path == "/api/navigation/visit": result = self.navigation.visit_authorized(str(body.get("id", "")))
+                elif path == "/api/navigation/search/activate":
+                    result = self.search.activate(str(body.get("id", "")))
+                    self.navigation.visit_authorized(str(result["folder"]["id"]))
+                    result.update(self.navigation.state())
+                else: self.send_error(404, "API endpoint not found"); return
+                self._json(200, result)
+            except (ValueError, OSError, PermissionError) as error:
+                self._operation_error(error)
+            return
         if path.startswith("/api/folder-browser/"):
             try:
                 body = self._read_json()
@@ -177,7 +204,8 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
                 elif path.endswith("/navigate"):
                     result = self.folder_browser.navigate(body.get("sessionId"), body.get("folderId"))
                 elif path.endswith("/confirm"):
-                    result = {"folder": self.folder_browser.confirm(body.get("sessionId"))}
+                    folder = self.folder_browser.confirm(body.get("sessionId"))
+                    result = {"folder": folder, **self.navigation.visit_authorized(str(folder["id"]))}
                 elif path.endswith("/cancel"):
                     self.folder_browser.cancel(body.get("sessionId")); result = {"cancelled": True}
                 else:
@@ -222,7 +250,8 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
             try:
                 selected = self.picker()
                 folder = self.directories.select(selected) if selected else None
-                self._json(200, {"folder": folder})
+                navigation = self.navigation.visit_authorized(str(folder["id"])) if folder else self.navigation.state()
+                self._json(200, {"folder": folder, **navigation})
             except FolderPickerUnavailable as error:
                 self._json(503, {"error": str(error), "code": "picker_failed"})
             except OSError as error:

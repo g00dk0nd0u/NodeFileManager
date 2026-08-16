@@ -18,6 +18,11 @@
         <small id="build-identity"></small>
         <span id="status" role="status">起動しています…</span>
       </header>
+      <nav class="quick-access" aria-label="クイックアクセス">
+        <div class="quick-search"><label for="quick-search">Search:</label><input id="quick-search" type="search" autocomplete="off" placeholder="名前を検索 (Ctrl/Cmd+K)"><div id="search-results" hidden></div></div>
+        <div class="quick-row"><strong>Favorites:</strong><div id="favorites" class="quick-chips"></div></div>
+        <div class="quick-row"><strong>HOT:</strong><div id="hot" class="quick-chips"></div></div>
+      </nav>
       <section id="canvas" tabindex="0">
         <svg id="edges" aria-hidden="true"><g></g></svg>
         <div id="world"></div>

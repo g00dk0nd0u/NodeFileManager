@@ -39,6 +39,7 @@
 
 - Favorites / HOT folders
 - 軽量な検索とナビゲーション改善
+- **進行中（実機 acceptance 後に完了判定）**
 
 ## Later
 

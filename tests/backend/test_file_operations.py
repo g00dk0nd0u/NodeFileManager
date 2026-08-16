@@ -8,6 +8,7 @@ from backend.filesystem.directory_service import DirectoryService
 from backend.filesystem.opener import FileOpener
 from backend.filesystem.operations import FileOperationError, FileOperations
 from backend.filesystem.roots import RootRegistry
+from backend.navigation.locations import canonical_location
 
 
 class FileOperationsTestCase(unittest.TestCase):
@@ -87,6 +88,20 @@ class FileOperationsTestCase(unittest.TestCase):
         with self.assertRaises(IsADirectoryError): opener.open(str(self.source_item["id"]))
         self.file.unlink()
         with self.assertRaises(FileNotFoundError): opener.open(str(self.file_item["id"]))
+
+    def test_rename_succeeds_when_navigation_persistence_fails(self):
+        operations = FileOperations(self.roots, self.directories, lambda old, new: (_ for _ in ()).throw(OSError("store failed")))
+        renamed = operations.rename(str(self.file_item["id"]), "renamed.txt")
+        self.assertEqual(canonical_location(str(renamed["path"])), canonical_location(self.source / "renamed.txt"))
+        self.assertTrue((self.source / "renamed.txt").is_file())
+        self.assertFalse(self.file.exists())
+
+    def test_move_succeeds_when_navigation_persistence_fails(self):
+        operations = FileOperations(self.roots, self.directories, lambda old, new: (_ for _ in ()).throw(OSError("store failed")))
+        moved = operations.move(str(self.file_item["id"]), str(self.destination_item["id"]))
+        self.assertEqual(canonical_location(str(moved["path"])), canonical_location(self.destination / "report.txt"))
+        self.assertTrue((self.destination / "report.txt").is_file())
+        self.assertFalse(self.file.exists())
 
 
 if __name__ == "__main__": unittest.main()

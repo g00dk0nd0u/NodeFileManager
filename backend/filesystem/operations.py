@@ -16,8 +16,9 @@ class FileOperationError(ValueError):
 
 
 class FileOperations:
-    def __init__(self, roots: RootRegistry, directories: DirectoryService) -> None:
+    def __init__(self, roots: RootRegistry, directories: DirectoryService, on_path_moved=None) -> None:
         self.roots, self.directories = roots, directories
+        self.on_path_moved = on_path_moved or (lambda old, new: None)
 
     @staticmethod
     def _validate_name(name: object) -> str:
@@ -81,6 +82,8 @@ class FileOperations:
         source = self.roots.path_for(identifier)
         was_root = self.roots.is_root(source)
         target = source.with_name(self._validate_name(name))
+        # Capture the registry-resolved spelling before the source disappears.
+        old_location, new_location = str(source), str(target)
         if source.name == target.name:
             parent_id = None if was_root else self.roots.remember(source.parent)
             return self.directories.metadata(source, parent_id)
@@ -102,6 +105,12 @@ class FileOperations:
             self._ensure_available(target)
             source.rename(target)
         self.roots.replace(source, target)
+        try:
+            self.on_path_moved(old_location, new_location)
+        except OSError:
+            # The real rename succeeded; optional Quick Access persistence is
+            # best-effort and must not misreport filesystem state.
+            pass
         parent_id = None if was_root else self.roots.remember(target.parent)
         return self.directories.metadata(target, parent_id)
 
@@ -129,10 +138,18 @@ class FileOperations:
         if self.roots.is_root(source):
             raise FileOperationError("A selected root cannot be moved; move its contents instead")
         target = destination / source.name
+        # Both values derive from authorized, resolved locations before mutation.
+        old_location, new_location = str(source), str(target)
         if source.parent == destination:
             raise FileOperationError("Item is already in that folder")
         self._reject_recursive(source, destination)
         self._ensure_available(target)
         shutil.move(str(source), str(target))
         self.roots.replace(source, target)
+        try:
+            self.on_path_moved(old_location, new_location)
+        except OSError:
+            # The real move succeeded; optional Quick Access persistence is
+            # best-effort and must not misreport filesystem state.
+            pass
         return self.directories.metadata(target, destination_id)

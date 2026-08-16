@@ -1,4 +1,4 @@
-import { createNodeElement, updateNodeElement } from "./node.js";
+import { createNodeElement, updateNodeElement, updatePreviewElement } from "./node.js";
 import { applyViewport } from "./viewport.js";
 
 export class FolderCanvas {
@@ -85,7 +85,7 @@ export class FolderCanvas {
 
   async loadNode(node) { const contents = await this.loadChildren(node.id); node.folders = contents.folders; node.files = contents.files; node.childrenLoaded = true; }
 
-  handlers() { return { folder: (parentId, folder) => this.openChild(parentId, folder), close: (id) => this.closeNode(id), newFolder: (id) => this.actions.newFolder?.(id), preview: (ownerId, file) => this.preview(ownerId, file), closePreview: (id) => this.closePreview(id), previewPage: (id, delta) => this.previewPage(id, delta), drag: (event, id) => this.startDrag(event, id), selectFolder: (id) => this.selectFolder(id), selectFile: (file, element) => this.selectFile(file, element), open: (id) => this.actions.open?.(id), rename: () => this.actions.rename?.(), drop: (event, id) => this.actions.transfer?.(event.dataTransfer.getData("application/x-nodefilemanager-item"), id, event.altKey) }; }
+  handlers() { return { folder: (parentId, folder) => this.openChild(parentId, folder), close: (id) => this.closeNode(id), newFolder: (id) => this.actions.newFolder?.(id), preview: (ownerId, file) => this.preview(ownerId, file), closePreview: (id) => this.closePreview(id), previewPage: (id, delta) => this.previewPage(id, delta), previewResized: (id) => this.previewResized(id), drag: (event, id) => this.startDrag(event, id), selectFolder: (id) => this.selectFolder(id), selectFile: (file, element) => this.selectFile(file, element), open: (id) => this.actions.open?.(id), rename: () => this.actions.rename?.(), drop: (event, id) => this.actions.transfer?.(event.dataTransfer.getData("application/x-nodefilemanager-item"), id, event.altKey) }; }
 
   async openChild(parentId, folder) {
     if (this.nodes.has(folder.id)) { this.removeBranch(folder.id); this.render(); this.layoutTree(parentId); this.render(); this.changed(); return; }
@@ -107,10 +107,13 @@ export class FolderCanvas {
   preview(ownerId, file) {
     const owner = this.nodes.get(ownerId);
     if (![".pdf", ".jpg", ".jpeg", ".png"].includes((file.extension || "").toLowerCase())) { if (owner.preview) this.closePreview(ownerId); return; }
-    owner.preview = { ...file, page: 1 }; this.render(); this.layoutTree(ownerId); this.render(); this.changed();
+    owner.preview = { ...file, page: 1 }; this.updatePreview(ownerId); this.changed();
   }
-  closePreview(id) { const node = this.nodes.get(id); if (!node) return; delete node.preview; this.render(); this.layoutTree(id); this.render(); this.changed(); }
-  previewPage(id, delta) { const preview = this.nodes.get(id)?.preview; if (!preview) return; preview.page = Math.max(1, preview.page + delta); this.render(); }
+  closePreview(id) { const node = this.nodes.get(id); if (!node) return; delete node.preview; this.updatePreview(id); this.changed(); }
+  previewPage(id, delta) { const preview = this.nodes.get(id)?.preview; if (!preview) return; preview.page = Math.max(1, preview.page + delta); this.updatePreview(id); }
+  updatePreview(id) { const node = this.nodes.get(id), element = this.elements.get(id); if (!node || !element) return; updatePreviewElement(element, node, this.handlers()); this.previewResized(id); }
+  previewResized(id) { const node = this.nodes.get(id), element = this.elements.get(id); if (!node || !element) return; node.renderedHeight = element.offsetHeight; this.layoutTree(id); this.updatePositions(); }
+  updatePositions() { for (const [id, element] of this.elements) { const node = this.nodes.get(id); if (node) element.style.transform = `translate(${node.x}px, ${node.y}px)`; } }
 
   selectFolder(id) { this.clearSelection(); this.selected = id; this.elements.get(id)?.classList.add("selected"); }
 
@@ -138,7 +141,11 @@ export class FolderCanvas {
     this.render(); for (const root of [...this.nodes.values()].filter((node) => !node.parentId)) this.layoutTree(root.id); this.render(); this.changed();
   }
 
-  removeBranch(id) { for (const child of [...this.nodes.values()].filter((item) => item.parentId === id)) this.removeBranch(child.id); this.nodes.delete(id); }
+  removeBranch(id) {
+    const removed = new Set([id, ...this.descendants(id).map((node) => node.id)]);
+    if (removed.has(this.selected) || (this.selectedItem && removed.has(this.selectedItem.parentId))) this.clearSelection();
+    for (const identifier of removed) this.nodes.delete(identifier);
+  }
   visibleFolders() { return [...this.nodes.values()].filter((node) => this.isVisible(node)); }
 
   async applyRename(oldId, item) {

@@ -45,13 +45,17 @@ export function updateNodeElement(element, node, selected, selectedItem, openFol
     return row;
   });
   contents.replaceChildren(...folderRows, ...fileRows);
+  updatePreviewElement(element, node, handlers);
+}
+
+export function updatePreviewElement(element, node, handlers) {
   const preview = element.querySelector(".node-preview"); preview.replaceChildren(); preview.hidden = !node.preview;
   if (node.preview) {
     const header = document.createElement("div"); header.className = "preview-title"; header.textContent = node.preview.name;
     const close = document.createElement("button"); close.type = "button"; close.textContent = "×"; close.addEventListener("click", () => handlers.closePreview(node.id)); header.prepend(close); preview.append(header);
     const url = `/api/files/preview?id=${encodeURIComponent(node.preview.id)}`;
     if ([".jpg", ".jpeg", ".png"].includes(node.preview.extension.toLowerCase())) {
-      const image = document.createElement("img"); image.src = url; image.alt = node.preview.name; preview.append(image);
+      const image = document.createElement("img"); image.src = url; image.alt = node.preview.name; image.addEventListener("load", () => handlers.previewResized(node.id)); preview.append(image);
     } else {
       const frame = document.createElement("iframe"); frame.src = `${url}#page=${node.preview.page}`; frame.title = node.preview.name; preview.append(frame);
       const controls = document.createElement("div"); controls.className = "preview-controls";

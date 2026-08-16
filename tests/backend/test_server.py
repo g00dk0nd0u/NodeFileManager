@@ -58,7 +58,12 @@ class ServerTestCase(unittest.TestCase):
     def test_health_and_static_frontend_are_served(self) -> None:
         status, body = self.request("GET", "/api/health")
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(body), {"status": "ok"})
+        health = json.loads(body)
+        self.assertEqual(health["status"], "ok")
+        self.assertEqual(health["app"], "NodeFileManager")
+        self.assertEqual(health["apiVersion"], 1)
+        self.assertIsInstance(health["version"], str)
+        self.assertIs(health["packaged"], False)
 
         status, body = self.request("GET", "/")
         self.assertEqual(status, 200)

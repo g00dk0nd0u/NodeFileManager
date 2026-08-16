@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from backend.filesystem import folder_picker
@@ -16,10 +15,12 @@ from backend.filesystem.opener import FileOpener
 from backend.filesystem.operations import FileOperationError, FileOperations
 from backend.filesystem.roots import RootRegistry
 from backend.workspace.store import WorkspaceStore
+from backend.runtime_paths import frontend_directory, is_packaged
+from backend.version import BUILD_COMMIT, VERSION
 
 HOST = "127.0.0.1"
 PORT = 8000
-FRONTEND_DIRECTORY = Path(__file__).resolve().parent.parent / "frontend"
+FRONTEND_DIRECTORY = frontend_directory()
 ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 ALLOWED_ORIGINS = {f"http://{host}" for host in ALLOWED_HOSTS}
 
@@ -35,6 +36,7 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
     workspace = WorkspaceStore()
     picker = staticmethod(folder_picker.select_folder)
     picker_lock = threading.Lock()
+    application_server: ThreadingHTTPServer | None = None
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, directory=str(FRONTEND_DIRECTORY), **kwargs)
@@ -68,7 +70,7 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
             return
         request = urlsplit(self.path)
         if request.path == "/api/health":
-            self._json(200, {"status": "ok"})
+            self._json(200, health_response())
         elif request.path == "/api/folders/children":
             identifier = parse_qs(request.query).get("id", [""])[0]
             try:
@@ -125,6 +127,14 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
         if not self._validate_request(require_origin=True):
             return
         path = urlsplit(self.path).path
+        if path == "/api/application/quit":
+            if not is_packaged():
+                self._json(409, {"error": "Use Ctrl+C to stop a source launch."})
+            else:
+                self._json(200, {"stopping": True})
+                if self.application_server is not None:
+                    threading.Thread(target=self.application_server.shutdown, daemon=True).start()
+            return
         if path.startswith("/api/folder-browser/"):
             try:
                 body = self._read_json()
@@ -223,9 +233,22 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
             self.send_error(404, "API endpoint not found")
 
 
+def health_response() -> dict[str, object]:
+    return {
+        "status": "ok", "app": "NodeFileManager", "apiVersion": 1,
+        "version": VERSION, "commit": BUILD_COMMIT, "packaged": is_packaged(),
+    }
+
+
+def create_server(host: str = HOST, port: int = PORT) -> ThreadingHTTPServer:
+    server = ThreadingHTTPServer((host, port), NodeFileManagerHandler)
+    NodeFileManagerHandler.application_server = server
+    return server
+
+
 def main() -> None:
     # The picker waits in one request thread; Tk itself lives in its child.
-    server = ThreadingHTTPServer((HOST, PORT), NodeFileManagerHandler)
+    server = create_server()
     print(f"NodeFileManager: http://{HOST}:{PORT}/")
     try:
         server.serve_forever()

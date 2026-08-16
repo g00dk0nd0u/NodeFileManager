@@ -1,4 +1,4 @@
-import { cancelFolderBrowser, confirmFolderBrowser, copyItem, createFolder, getChildren, getHealth, moveItem, navigateFolderBrowser, openFile, renameItem, startFolderBrowser } from "./api/client.js";
+import { cancelFolderBrowser, confirmFolderBrowser, copyItem, createFolder, getChildren, getHealth, moveItem, navigateFolderBrowser, openFile, quitApplication, renameItem, startFolderBrowser } from "./api/client.js";
 import { FolderCanvas } from "./canvas/canvas.js";
 import { createWorkspaceSaver, restoreWorkspace } from "./workspace/workspace.js";
 
@@ -40,7 +40,10 @@ document.querySelector("#new-folder-confirm").addEventListener("click", async (e
 });
 
 try {
-  await getHealth();
+  const health = await getHealth();
+  document.querySelector("#build-identity").textContent = `v${health.version} · ${health.packaged ? "packaged" : "source"}${health.commit !== "unknown" ? ` · ${health.commit.slice(0, 8)}` : ""}`;
+  const quit = document.querySelector("#quit");
+  if (health.packaged) { quit.hidden = false; quit.addEventListener("click", async () => { status.textContent = "終了しています…"; await quitApplication(); }); }
   status.textContent = await restoreWorkspace(canvas);
 } catch (error) { showError(error); }
 

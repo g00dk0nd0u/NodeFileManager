@@ -26,6 +26,15 @@
 - ファイルのドラッグ＆ドロップ移動（Alt でコピー）
 - **完了（安全な削除は意図的に延期）**
 
+## Phase 3.5 — Launch / Packaging / Test Distribution
+
+- macOS / Windows の source one-click launcher
+- Windows x64 / macOS x64 standalone artifact
+- 永続 diagnostic log と build identity
+- packaged executable の health smoke test
+- non-developer tester 向け実行手順
+- **完了**
+
 ## Phase 4（次の breadth-first milestone）
 
 - Favorites / HOT folders

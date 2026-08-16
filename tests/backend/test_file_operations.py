@@ -26,6 +26,7 @@ class FileOperationsTestCase(unittest.TestCase):
 
     def test_listing_returns_explicit_file_metadata(self):
         self.assertEqual((self.file_item["kind"], self.file_item["extension"], self.file_item["parentId"]), ("file", ".txt", self.source_item["id"]))
+        self.assertIsInstance(self.file_item["modifiedTime"], float)
         self.file.unlink()
         self.assertEqual(self.directories.contents(str(self.source_item["id"]))["files"], [])
 

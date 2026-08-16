@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, urlsplit
 from backend.filesystem import folder_picker
 from backend.filesystem.directory_service import DirectoryService
 from backend.filesystem.folder_picker import FolderPickerUnavailable
+from backend.filesystem.folder_browser import FolderBrowser
 from backend.filesystem.opener import FileOpener
 from backend.filesystem.operations import FileOperationError, FileOperations
 from backend.filesystem.roots import RootRegistry
@@ -29,6 +30,7 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
     roots = RootRegistry()
     directories = DirectoryService(roots)
     operations = FileOperations(roots, directories)
+    folder_browser = FolderBrowser(directories)
     opener = FileOpener(roots)
     workspace = WorkspaceStore()
     picker = staticmethod(folder_picker.select_folder)
@@ -107,6 +109,23 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
         if not self._validate_request(require_origin=True):
             return
         path = urlsplit(self.path).path
+        if path.startswith("/api/folder-browser/"):
+            try:
+                body = self._read_json()
+                if path.endswith("/start"):
+                    result = self.folder_browser.start()
+                elif path.endswith("/navigate"):
+                    result = self.folder_browser.navigate(body.get("sessionId"), body.get("folderId"))
+                elif path.endswith("/confirm"):
+                    result = {"folder": self.folder_browser.confirm(body.get("sessionId"))}
+                elif path.endswith("/cancel"):
+                    self.folder_browser.cancel(body.get("sessionId")); result = {"cancelled": True}
+                else:
+                    self.send_error(404, "API endpoint not found"); return
+                self._json(200, result)
+            except (ValueError, OSError, PermissionError) as error:
+                self._operation_error(error)
+            return
         if path in {"/api/files/open", "/api/items/copy", "/api/items/move"}:
             try:
                 body = self._read_json()

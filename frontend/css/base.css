@@ -29,3 +29,8 @@ dialog::backdrop { background: #0009; }
 dialog form { display: grid; gap: 12px; }
 dialog select { width: 100%; padding: 6px; background: #343941; color: inherit; border: 1px solid #555b64; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.folder-browser-locations { display: flex; gap: 6px; flex-wrap: wrap; }
+.folder-browser-path { padding: 6px; color: #adb2b8; overflow-wrap: anywhere; }
+.folder-browser-folders { max-height: 45vh; overflow-y: auto; border: 1px solid #454b54; }
+.folder-browser-folders button { display: block; width: 100%; padding: 7px; border: 0; text-align: left; background: transparent; color: inherit; }
+.folder-browser-folders button:hover { background: #ffffff12; }

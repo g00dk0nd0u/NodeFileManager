@@ -14,8 +14,6 @@
         <button id="select-folder" type="button">＋ Select Folder</button>
         <button id="refresh" type="button">↻ Refresh</button>
         <button id="rename" type="button">Rename</button>
-        <button id="copy" type="button">Copy</button>
-        <button id="move" type="button">Move</button>
         <span id="status" role="status">起動しています…</span>
       </header>
       <section id="canvas" tabindex="0">
@@ -23,13 +21,15 @@
         <div id="world"></div>
         <p id="empty-hint">Select Folder からフォルダーを追加してください<br><small>ドラッグ: ノード移動　背景ドラッグ: パン　ホイール: ズーム</small></p>
       </section>
-      <dialog id="destination-dialog">
-        <form method="dialog">
-          <label id="destination-label" for="destination-folder">移動先フォルダー</label>
-          <select id="destination-folder" required></select>
+      <dialog id="folder-browser-dialog">
+        <form method="dialog" id="folder-browser-form">
+          <strong>Select Folder</strong>
+          <div class="folder-browser-locations"></div>
+          <div class="folder-browser-path"></div>
+          <div class="folder-browser-folders"></div>
           <div class="dialog-actions">
             <button value="cancel">Cancel</button>
-            <button id="destination-confirm" value="confirm">実行</button>
+            <button id="folder-browser-confirm" value="confirm">Select This Folder</button>
           </div>
         </form>
       </dialog>

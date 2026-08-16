@@ -29,7 +29,7 @@ export class FolderCanvas {
         ...root,
         x: saved?.x ?? index * 220,
         y: saved?.y ?? 80,
-        expanded: false,
+        expanded: saved?.expanded ?? true,
         childrenLoaded: false,
       });
     }
@@ -42,31 +42,22 @@ export class FolderCanvas {
   async restoreExpanded(id, savedNodes) {
     const saved = savedNodes[id];
     const parent = this.nodes.get(id);
-    if (!saved?.expanded || !parent?.hasChildren) return;
+    if (!parent?.expanded) return;
     const contents = await this.loadChildren(id), children = contents.folders;
-    parent.files = contents.files; parent.childrenState = contents.folders.length + contents.files.length ? "present" : "empty"; parent.hasChildren = parent.childrenState === "present";
-    const positions = childPositions(parent, children.length);
-    for (const [index, child] of children.entries()) {
-      const savedChild = savedNodes[child.id];
-      this.nodes.set(child.id, {
-        ...child,
-        x: savedChild?.x ?? positions[index].x,
-        y: savedChild?.y ?? positions[index].y,
-        expanded: false,
-        childrenLoaded: false,
-      });
+    parent.files = contents.files; parent.folders = children; parent.childrenLoaded = true;
+    for (const child of children) {
+      const savedChild = savedNodes[child.id]; if (!savedChild) continue;
+      this.nodes.set(child.id, { ...child, x: savedChild.x, y: savedChild.y, expanded: savedChild.expanded, childrenLoaded: false });
+      await this.restoreExpanded(child.id, savedNodes);
     }
-    parent.childrenLoaded = true;
-    parent.expanded = true;
-    for (const child of children) await this.restoreExpanded(child.id, savedNodes);
   }
 
-  addRoot(folder) {
+  async addRoot(folder) {
     if (!this.nodes.has(folder.id)) {
       const center = this.screenToWorld(this.canvas.clientWidth / 2, this.canvas.clientHeight / 3);
-      this.nodes.set(folder.id, { ...folder, expanded: false, x: center.x - 90, y: center.y });
+      this.nodes.set(folder.id, { ...folder, expanded: true, childrenLoaded: false, x: center.x - 120, y: center.y });
     }
-    this.selected = folder.id; this.render(); this.changed();
+    const node = this.nodes.get(folder.id); await this.loadNode(node); this.selected = folder.id; this.render(); this.changed();
   }
 
   isVisible(node) {
@@ -86,7 +77,8 @@ export class FolderCanvas {
     for (const [id, node] of visible) {
       let element = this.elements.get(id);
       if (!element) { element = createNodeElement(node, this.handlers()); this.elements.set(id, element); this.world.append(element); }
-      updateNodeElement(element, node, id === this.selected, this.selectedItem?.id, this.handlers());
+      updateNodeElement(element, node, id === this.selected, this.selectedItem?.id, new Set([...this.nodes.values()].filter((child) => child.parentId === id).map((child) => child.id)), this.handlers());
+      node.renderedHeight = element.offsetHeight;
     }
     renderEdges(this.edges, visible);
     document.querySelector("#empty-hint").hidden = this.nodes.size > 0;
@@ -94,16 +86,26 @@ export class FolderCanvas {
 
   async toggle(id) {
     const node = this.nodes.get(id);
-    if (!node.expanded && !node.childrenLoaded) {
-      const contents = await this.loadChildren(id), children = contents.folders;
-      node.files = contents.files; node.childrenState = children.length + contents.files.length ? "present" : "empty"; node.hasChildren = node.childrenState === "present";
-      this.reconcileChildren(node, children);
-      node.childrenLoaded = true;
-    }
+    if (!node.expanded && !node.childrenLoaded) await this.loadNode(node);
     node.expanded = !node.expanded; this.render(); this.changed();
   }
 
-  handlers() { return { toggle: (id) => this.toggle(id), drag: (event, id) => this.startDrag(event, id), selectFolder: (id) => this.selectFolder(id), selectFile: (file, element) => this.selectFile(file, element), open: (id) => this.actions.open?.(id), rename: () => this.actions.rename?.(), drop: (event, id) => this.actions.transfer?.(event.dataTransfer.getData("application/x-nodefilemanager-item"), id, event.altKey) }; }
+  async loadNode(node) { const contents = await this.loadChildren(node.id); node.folders = contents.folders; node.files = contents.files; node.childrenLoaded = true; }
+
+  handlers() { return { toggle: (id) => this.toggle(id), folder: (parentId, folder) => this.openChild(parentId, folder), drag: (event, id) => this.startDrag(event, id), selectFolder: (id) => this.selectFolder(id), selectFile: (file, element) => this.selectFile(file, element), open: (id) => this.actions.open?.(id), rename: () => this.actions.rename?.(), drop: (event, id) => this.actions.transfer?.(event.dataTransfer.getData("application/x-nodefilemanager-item"), id, event.altKey) }; }
+
+  async openChild(parentId, folder) {
+    if (this.nodes.has(folder.id)) { this.removeBranch(folder.id); this.layoutChildren(parentId); this.render(); this.changed(); return; }
+    const parent = this.nodes.get(parentId); const child = { ...folder, parentId, expanded: true, childrenLoaded: false, x: parent.x, y: parent.y + 160 };
+    this.nodes.set(folder.id, child); await this.loadNode(child); this.render(); this.layoutChildren(parentId); this.render(); this.changed();
+  }
+
+  layoutChildren(parentId) {
+    const parent = this.nodes.get(parentId), children = [...this.nodes.values()].filter((node) => node.parentId === parentId); if (!parent || !children.length) return;
+    const height = this.elements.get(parentId)?.offsetHeight || 80, y = parent.y + height + 22;
+    if (children.length === 1) { children[0].x = parent.x; children[0].y = y; return; }
+    const positions = childPositions({ ...parent, y: y - 130 }, children.length); children.forEach((child, index) => Object.assign(child, positions[index], { y }));
+  }
 
   selectFolder(id) { this.clearSelection(); this.selected = id; this.elements.get(id)?.classList.add("selected"); }
 
@@ -123,25 +125,15 @@ export class FolderCanvas {
     for (const node of targets.filter(Boolean)) {
       if (!this.nodes.has(node.id)) continue;
       const contents = await this.loadChildren(node.id); node.childrenState = contents.files.length + contents.folders.length ? "present" : "empty"; node.hasChildren = node.childrenState === "present";
+      const availableFolders = new Set(contents.folders.map((folder) => folder.id));
+      [...this.nodes.values()].filter((child) => child.parentId === node.id && !availableFolders.has(child.id)).forEach((child) => this.removeBranch(child.id));
       if (node.expanded) {
-        node.files = contents.files; this.reconcileChildren(node, contents.folders); node.childrenLoaded = true;
+        node.files = contents.files; node.folders = contents.folders; node.childrenLoaded = true;
       } else {
         node.files = []; node.childrenLoaded = false;
       }
     }
     this.render(); this.changed();
-  }
-
-  reconcileChildren(node, children) {
-    const current = [...this.nodes.values()].filter((child) => child.parentId === node.id);
-    const incoming = new Set(children.map((child) => child.id));
-    current.filter((child) => !incoming.has(child.id)).forEach((child) => this.removeBranch(child.id));
-    const positions = childPositions(node, children.length);
-    children.forEach((child, index) => {
-      const existing = this.nodes.get(child.id);
-      if (existing) Object.assign(existing, child);
-      else this.nodes.set(child.id, { ...child, ...positions[index], expanded: false, childrenLoaded: false });
-    });
   }
 
   removeBranch(id) { for (const child of [...this.nodes.values()].filter((item) => item.parentId === id)) this.removeBranch(child.id); this.nodes.delete(id); }
@@ -218,7 +210,7 @@ export class FolderCanvas {
   changed() { this.onChange(this.serialize()); }
   serialize() {
     const nodes = Object.fromEntries([...this.nodes].map(([id, node]) => {
-      const { childrenLoaded, files, ...persistentNode } = node;
+      const { childrenLoaded, folders, files, renderedHeight, ...persistentNode } = node;
       return [id, persistentNode];
     }));
     const roots = [...this.nodes.values()].filter((node) => !node.parentId).map(({ id, path }) => ({ id, path }));

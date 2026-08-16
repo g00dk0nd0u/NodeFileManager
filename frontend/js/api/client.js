@@ -5,7 +5,10 @@ async function request(path, options = {}) {
   return body;
 }
 export const getHealth = () => request("/api/health");
-export const selectFolder = () => request("/api/folders/select", { method: "POST", body: "{}" });
+export const startFolderBrowser = () => request("/api/folder-browser/start", { method: "POST", body: "{}" });
+export const navigateFolderBrowser = (sessionId, folderId) => request("/api/folder-browser/navigate", { method: "POST", body: JSON.stringify({ sessionId, folderId }) });
+export const confirmFolderBrowser = (sessionId) => request("/api/folder-browser/confirm", { method: "POST", body: JSON.stringify({ sessionId }) });
+export const cancelFolderBrowser = (sessionId) => request("/api/folder-browser/cancel", { method: "POST", body: JSON.stringify({ sessionId }) });
 export const getChildren = (id) => request(`/api/folders/children?id=${encodeURIComponent(id)}`);
 export const openFile = (id) => request("/api/files/open", { method: "POST", body: JSON.stringify({ id }) });
 export const renameItem = (id, name) => request("/api/items/rename", { method: "PATCH", body: JSON.stringify({ id, name }) });

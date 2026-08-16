@@ -39,6 +39,10 @@ class DirectoryService:
         for entry, is_folder in entries:
             path = parent / entry.name
             kind = "folder" if is_folder else "file"
+            try:
+                modified_time = None if is_folder else entry.stat(follow_symlinks=False).st_mtime
+            except OSError:
+                modified_time = None
             item = {
                 "id": self.roots.remember_child(parent, entry.name),
                 "name": entry.name,
@@ -48,6 +52,7 @@ class DirectoryService:
                 "extension": "" if is_folder else path.suffix,
                 "childrenState": "unknown" if is_folder else "empty",
                 "hasChildren": is_folder,
+                "modifiedTime": modified_time,
             }
             (folders if is_folder else files).append(item)
         return {"folders": folders, "files": files}

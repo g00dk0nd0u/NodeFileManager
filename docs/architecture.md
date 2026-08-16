@@ -11,6 +11,7 @@ HTTP サーバーは `ThreadingHTTPServer` です。picker を待つリクエス
 `RootRegistry` はセッション中の選択済みルートと発見済み item ID を保持し、一覧・open・変更 API は ID だけを受け取ります。各操作時に実在性と symlink 解決後のルート内包含を再検証します。ブラウザー指定の任意パスや実行コマンドを受け取る API はありません。復元時だけ、以前保存したルートが現在も実在することを検証して再認可します。
 
 一覧は認可済み親を一度だけ厳密に解決し、`os.scandir()` の一回の走査で直下を分類します。直下 item は lexical path と ID だけを安価に登録し、子フォルダー内は展開されるまで読みません。open・変更・次階層の一覧時には、保存済み path を厳密に resolve して認可ルート内であることを再検証します。
+ファイルの更新時刻は同じ `DirEntry` の `stat()` から取得します。ファイルごとの metadata I/O は発生し得ますが、子フォルダー内部の走査は行いません。通常のルート選択は短命な server-side folder-browser session と opaque ID を使い、confirm 時にだけ選択中pathを認可します。Tk pickerは通常UIから使用しないfallbackです。
 
 ## API
 

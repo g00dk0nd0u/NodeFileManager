@@ -7,6 +7,7 @@ const paths = {
   refresh: '<path d="M16 7V3l-1.8 1.8A7 7 0 1 0 17 10"/>',
   previous: '<path d="m12.5 5-5 5 5 5"/>',
   next: '<path d="m7.5 5 5 5-5 5"/>',
+  up: '<path d="m5 12.5 5-5 5 5"/>',
 };
 
 export function createIcon(name) {

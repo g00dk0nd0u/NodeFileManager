@@ -39,7 +39,7 @@ const browserDialog = document.querySelector("#folder-browser-dialog"), newFolde
 const browserButton = (label, id, icon = null) => { const button = document.createElement("button"); button.type = "button"; button.textContent = label; if (icon) button.prepend(createIcon(icon)); button.addEventListener("click", () => navigateBrowser(id)); return button; };
 function showBrowser(view) {
   browserSession = view.sessionId; document.querySelector(".folder-browser-path").textContent = view.current.path;
-  const locations = view.locations.map((item) => browserButton(item.name, item.id)); if (view.parentId) locations.push(browserButton("Up", view.parentId));
+  const locations = view.locations.map((item) => browserButton(item.name, item.id)); if (view.parentId) locations.push(browserButton("Up", view.parentId, "up"));
   document.querySelector(".folder-browser-locations").replaceChildren(...locations);
   document.querySelector(".folder-browser-folders").replaceChildren(...view.folders.map((item) => browserButton(item.name, item.id, "folder")));
 }

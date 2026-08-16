@@ -1,4 +1,5 @@
-#canvas { position: relative; height: calc(100vh - 130px); overflow: hidden; cursor: grab; outline: none; background-color: #1c1e22; background-image: linear-gradient(#15171acc, transparent 14px), radial-gradient(#353940 1px, transparent 1px); background-size: 100% 22px, 24px 24px; background-repeat: no-repeat, repeat; }
+#canvas { position: relative; height: calc(100vh - 130px); overflow: hidden; cursor: grab; outline: none; background-color: #1c1e22; background-image: radial-gradient(#353940 1px, transparent 1px); background-size: 24px 24px; }
+#canvas::before { content: ""; position: absolute; inset: 0 0 auto; height: 18px; background: linear-gradient(#15171a, transparent); pointer-events: none; z-index: 3; }
 #canvas.panning { cursor: grabbing; }
 #world, #edges { position: absolute; inset: 0; transform-origin: 0 0; overflow: visible; }
 #edges { width: 1px; height: 1px; pointer-events: none; }

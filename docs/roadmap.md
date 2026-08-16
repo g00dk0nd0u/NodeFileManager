@@ -1,22 +1,28 @@
-# Roadmap
+# ロードマップ
 
 ## Phase 0
 
-Open one real folder and display one folder node.
+- 1 つの実フォルダーを選択する
+- 1 つのフォルダーノードとして表示する
 
 ## Phase 1
 
-Expand child folders and show parent/child edges.
+- 子フォルダーを展開する
+- 親子エッジを表示する
 
 ## Phase 2
 
-Support free node movement, zoom and pan, and workspace persistence.
+- ノード移動
+- ズーム／パン
+- ワークスペース永続化
 
 ## Phase 3
 
-Add rename, move, copy, delete, and drag-and-drop operations.
+- 名前変更／移動／コピー／削除
+- ドラッグ＆ドロップ
 
 ## Phase 4
 
-Support multiple roots, favorites, and HOT folders.
-
+- 複数ルート
+- Favorites
+- HOT folders

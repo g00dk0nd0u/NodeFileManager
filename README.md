@@ -1,40 +1,33 @@
 # NodeFileManager
 
-NodeFileManager is a desktop file manager concept that will represent real folders and files as nodes on a free-form canvas.
+NodeFileManager は、実際のファイルシステムをグラフィカルなワークスペースで扱うための Windows 向けプロジェクトです。現在は製品機能を持たない、アーキテクチャ確認用の最小基盤です。
 
-This repository currently contains only the initial Tauri 2, React, TypeScript, and Vite project skeleton. Filesystem operations and the node canvas are intentionally not implemented yet.
+## 必要環境
 
-## Prerequisites
+- Python 3.14
+- Microsoft Edge などのブラウザー
 
-- Node.js and npm
-- Rust stable toolchain
-- Platform requirements for [Tauri 2](https://v2.tauri.app/start/prerequisites/)
+**Node.js、npm、pnpm、yarn は不要です。** 外部 Python パッケージも使用しません。
 
-## Development
+## 起動
 
-```sh
-npm install
-npm run tauri dev
-```
+1. Python 3.14 を社内 Software Center から導入します。
+2. リポジトリの `scripts\start.cmd` をダブルクリックするか、コマンドプロンプトから実行します。
+3. ブラウザーで <http://127.0.0.1:8000/> を開きます。
+4. 終了するにはサーバーのウィンドウで `Ctrl+C` を押します。
 
-## Validation
+`start.cmd` は `py -3.14` を優先し、利用できない場合は `python` を試します。パッケージのインストールやビルドは行いません。
 
-```sh
-npm run typecheck
-npm run build
-npm run tauri build
-```
+## アーキテクチャ
 
-## Project structure
+- `frontend/`: HTML5、CSS、ネイティブ ES Modules のみで構成する UI
+- `backend/`: Python 標準ライブラリによる localhost 専用 HTTP/JSON API、将来のファイルシステム処理と SQLite 永続化
+- `scripts/`: Windows 用起動スクリプト
+- `docs/`: コンセプト、責務分離、ロードマップ
+- `tests/`: 将来のバックエンド／フロントエンドテスト
 
-- `src/app`: application entry UI
-- `src/canvas`: future canvas state and rendering
-- `src/workspace`: future workspace layout and persistence
-- `src/filesystem`: future filesystem boundary
-- `src/features`: future user-facing feature modules
-- `src/components`: future shared UI components
-- `src/utils`: future shared utilities
-- `src-tauri`: Tauri configuration and Rust backend
-- `docs`: product concept, architecture, and roadmap
-- `tests`: future cross-cutting tests
+詳細は [architecture.md](docs/architecture.md) を参照してください。
 
+## 現在の状態
+
+サーバーは静的フロントエンドと `GET /api/health` のみを提供します。ファイルの走査・変更、ノード表示・編集、ワークスペース保存は未実装であり、Phase 0 にも着手していません。

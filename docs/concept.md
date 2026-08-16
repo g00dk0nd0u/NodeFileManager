@@ -1,10 +1,12 @@
-# Product concept
+# 製品コンセプト
 
-NodeFileManager is a desktop file manager that presents the real filesystem as a spatial node graph rather than only as a list or tree.
+NodeFileManager は、フォルダーをグラフィカルなノードとして表現する、自由配置可能な無限ワークスペースを目指します。
 
-The workspace will provide an infinite, free-form canvas. Real folders will be represented as nodes, and parent/child folder relationships will be represented by edges. The default hierarchy will generally expand from top to bottom so that an opened folder is easy to understand at a glance.
+- フォルダーを DOM ノードとして表示する
+- ファイルシステム階層をノード間のエッジで示す
+- 親から子への既定レイアウトは原則として縦方向に流れる
+- ユーザーはノードを自由に再配置できる
+- 実ファイルシステムを常にデータの正とする
+- 表示位置などのワークスペースレイアウトは、ファイルシステム階層とは独立して永続化する
 
-Nodes will later be freely repositionable without changing the underlying filesystem hierarchy. The workspace layout will eventually persist between application launches, preserving the user's spatial organization.
-
-Future filesystem operations will include renaming, moving, copying, and deleting real files and folders. These operations are deliberately outside the initial project skeleton.
-
+この基盤構築では製品機能を実装せず、Phase 0 にも着手しません。

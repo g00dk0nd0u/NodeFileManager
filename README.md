@@ -1,33 +1,40 @@
 # NodeFileManager
 
-NodeFileManager は、実際のファイルシステムをグラフィカルなワークスペースで扱うための Windows 向けプロジェクトです。現在は製品機能を持たない、アーキテクチャ確認用の最小基盤です。
+NodeFileManager は、実フォルダーを自由配置できるノードとして閲覧する Windows 向けローカルアプリです。Blender Node Editor の暗い、広い、直接操作できるワークスペースを参考にしつつ、ファイル管理に不要なソケット等は持ちません。
 
-## 必要環境
+## 必要環境と起動
 
-- Python 3.14
+- Python 3.14（`tkinter` を含むこと）
 - Microsoft Edge などのブラウザー
+- Node.js、npm、ビルド、CDN、外部 Python パッケージは不要
 
-**Node.js、npm、pnpm、yarn は不要です。** 外部 Python パッケージも使用しません。
+`scripts\start.cmd` をダブルクリックします。バックエンドの準備後に <http://127.0.0.1:8000/> が自動で開きます。終了はコマンド画面で `Ctrl+C` です。
 
-## 起動
+## 使い方
 
-1. Python 3.14 を社内 Software Center から導入します。
-2. リポジトリの `scripts\start.cmd` をダブルクリックするか、コマンドプロンプトから実行します。
-3. ブラウザーで <http://127.0.0.1:8000/> を開きます。
-4. 終了するにはサーバーのウィンドウで `Ctrl+C` を押します。
+1. **Select Folder** を押し、Windows のダイアログで実フォルダーを選択します。
+2. ノード左上の三角を押すと、直下のフォルダーと親子エッジが表示されます。
+3. ノードをドラッグして移動します。背景ドラッグでパン、ホイールでズームします。
+4. 配置、展開状態、パン、ズームは自動保存され、次回起動時に復元されます。
 
-`start.cmd` は `py -3.14` を優先し、利用できない場合は `python` を試します。パッケージのインストールやビルドは行いません。
+## アーキテクチャと永続化
 
-## アーキテクチャ
+- `frontend/`: HTML/CSS、ネイティブ ES Modules。DOM ノードと SVG エッジを描画
+- `backend/filesystem/`: ネイティブ選択ダイアログ、許可ルート、読み取り専用ディレクトリ一覧
+- `backend/workspace/`: UI 状態をローカル JSON に原子的に保存
+- `backend/server.py`: Python 標準ライブラリだけの localhost HTTP API と静的配信
 
-- `frontend/`: HTML5、CSS、ネイティブ ES Modules のみで構成する UI
-- `backend/`: Python 標準ライブラリによる localhost 専用 HTTP/JSON API、将来のファイルシステム処理と SQLite 永続化
-- `scripts/`: Windows 用起動スクリプト
-- `docs/`: コンセプト、責務分離、ロードマップ
-- `tests/`: 将来のバックエンド／フロントエンドテスト
+Windows では `%LOCALAPPDATA%\NodeFileManager\workspace.json`、その他では `~/.nodefilemanager/workspace.json` を使います。JSON は表示状態のみで、実フォルダーの内容を変更しません。詳細は [architecture.md](docs/architecture.md) を参照してください。
 
-詳細は [architecture.md](docs/architecture.md) を参照してください。
+## 社内 Windows PC での手動確認
 
-## 現在の状態
+1. Python 3.14 を導入し、`py -3.14 -m tkinter` で Tk ダイアログが開くことを確認します。
+2. `scripts\start.cmd` をダブルクリックし、ブラウザーが自動表示されることを確認します。
+3. **Select Folder** で子フォルダーを持つ実フォルダーを選択します。
+4. 展開、エッジ表示、ノード移動、背景パン、ホイールズームを順に確認します。
+5. `Ctrl+C` で終了し、再度 `start.cmd` を実行してルート、展開、位置、パン、ズームが戻ることを確認します。
+6. 選択済みフォルダーを一時的に移動して再起動し、画面が停止せず復元不能件数を表示することを確認します。
 
-サーバーは静的フロントエンドと `GET /api/health` のみを提供します。ファイルの走査・変更、ノード表示・編集、ワークスペース保存は未実装であり、Phase 0 にも着手していません。
+## 既知の制限
+
+フォルダーのみを一階層ずつ読み取ります。ファイル表示、変更操作、監視、検索、undo/redo、複数タブ、高度な自動配置は未実装です。Tk がない Python では選択できませんが、UI に明示的なエラーを表示します。同時に複数プロセスを起動する運用や巨大ディレクトリの性能は未調整です。

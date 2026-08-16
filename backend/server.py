@@ -1,11 +1,17 @@
-"""Local HTTP server for the NodeFileManager baseline."""
+"""Localhost-only HTTP server for NodeFileManager."""
 
 from __future__ import annotations
 
 import json
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
+
+from backend.filesystem import folder_picker
+from backend.filesystem.directory_service import DirectoryService
+from backend.filesystem.folder_picker import FolderPickerUnavailable
+from backend.filesystem.roots import RootRegistry
+from backend.workspace.store import WorkspaceStore
 
 HOST = "127.0.0.1"
 PORT = 8000
@@ -15,10 +21,24 @@ ALLOWED_ORIGINS = {f"http://{host}" for host in ALLOWED_HOSTS}
 
 
 class NodeFileManagerHandler(SimpleHTTPRequestHandler):
-    """Serve the fixed frontend directory and the small, explicit API."""
+    """Serve the frontend and explicit filesystem/workspace APIs."""
+
+    roots = RootRegistry()
+    directories = DirectoryService(roots)
+    workspace = WorkspaceStore()
+    picker = staticmethod(folder_picker.select_folder)
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, directory=str(FRONTEND_DIRECTORY), **kwargs)
+
+    def _json(self, status: int, value: object) -> None:
+        payload = json.dumps(value, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(payload)
 
     def _has_allowed_host(self) -> bool:
         return self.headers.get("Host", "").lower() in ALLOWED_HOSTS
@@ -27,7 +47,6 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
         return self.headers.get("Origin", "").lower() in ALLOWED_ORIGINS
 
     def _validate_request(self, *, require_origin: bool = False) -> bool:
-        """Enforce the localhost HTTP boundary before routing a request."""
         if not self._has_allowed_host():
             self.send_error(400, "Invalid Host header")
             return False
@@ -36,39 +55,86 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
             return False
         return True
 
-    def do_GET(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler
+    def do_GET(self) -> None:  # noqa: N802
         if not self._validate_request():
             return
+        request = urlsplit(self.path)
+        if request.path == "/api/health":
+            self._json(200, {"status": "ok"})
+        elif request.path == "/api/folders/children":
+            identifier = parse_qs(request.query).get("id", [""])[0]
+            try:
+                self._json(200, {"folders": self.directories.children(identifier)})
+            except PermissionError as error:
+                self._json(403, {"error": str(error)})
+        elif request.path == "/api/workspace":
+            state = self.workspace.load()
+            # Re-authorize only stored roots that still exist; inaccessible roots remain
+            # in state so the UI can explain what was not restored.
+            available = []
+            for root in state.get("roots", []):
+                try:
+                    available.append(self.directories.select(str(root["path"])))
+                except (OSError, KeyError, TypeError):
+                    continue
+            for node in state.get("nodes", {}).values():
+                try:
+                    self.roots.remember(Path(node["path"]))
+                except (OSError, KeyError, TypeError, PermissionError):
+                    continue
+            self._json(200, {"state": state, "availableRoots": available})
+        elif request.path.startswith("/api/"):
+            self.send_error(404, "API endpoint not found")
+        else:
+            super().do_GET()
 
-        if urlsplit(self.path).path == "/api/health":
-            payload = json.dumps({"status": "ok"}).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(payload)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(payload)
-            return
+    def _read_json(self) -> dict[str, object]:
+        length = int(self.headers.get("Content-Length", "0"))
+        if length > 1_000_000:
+            raise ValueError("Request is too large")
+        value = json.loads(self.rfile.read(length) or b"{}")
+        if not isinstance(value, dict):
+            raise ValueError("JSON object required")
+        return value
 
-        super().do_GET()
-
-    def _reject_unimplemented_state_change(self) -> None:
-        """Protect the boundary even before state-changing routes exist."""
+    def do_POST(self) -> None:  # noqa: N802
         if not self._validate_request(require_origin=True):
             return
-        self.send_error(404, "API endpoint not found")
+        if urlsplit(self.path).path != "/api/folders/select":
+            self.send_error(404, "API endpoint not found")
+            return
+        try:
+            selected = self.picker()
+            self._json(200, {"folder": self.directories.select(selected) if selected else None})
+        except FolderPickerUnavailable as error:
+            self._json(503, {"error": str(error)})
+        except OSError as error:
+            self._json(400, {"error": f"選択したフォルダーを利用できません: {error}"})
 
-    do_POST = _reject_unimplemented_state_change
-    do_PUT = _reject_unimplemented_state_change
-    do_PATCH = _reject_unimplemented_state_change
-    do_DELETE = _reject_unimplemented_state_change
+    def do_PUT(self) -> None:  # noqa: N802
+        if not self._validate_request(require_origin=True):
+            return
+        if urlsplit(self.path).path != "/api/workspace":
+            self.send_error(404, "API endpoint not found")
+            return
+        try:
+            state = self._read_json()
+            self.workspace.save(state)
+            self._json(200, {"saved": True})
+        except (ValueError, json.JSONDecodeError, OSError) as error:
+            self._json(400, {"error": str(error)})
+
+    do_PATCH = lambda self: self._reject_state_change()  # noqa: E731
+    do_DELETE = lambda self: self._reject_state_change()  # noqa: E731
+
+    def _reject_state_change(self) -> None:
+        if self._validate_request(require_origin=True):
+            self.send_error(404, "API endpoint not found")
 
 
 def main() -> None:
-    """Run the server on the loopback interface only."""
     server = ThreadingHTTPServer((HOST, PORT), NodeFileManagerHandler)
     print(f"NodeFileManager: http://{HOST}:{PORT}/")
-    print("Press Ctrl+C to stop the server.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

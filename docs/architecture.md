@@ -1,18 +1,43 @@
-# Architecture
+# アーキテクチャ
 
-The application will keep three responsibilities separate as it grows. The initial skeleton defines only their boundaries; it does not implement domain services or state abstractions yet.
+NodeFileManager は、ブラウザー UI とローカル Python サーバーを HTTP/JSON 境界で厳密に分離します。サーバーは `127.0.0.1` のみにバインドします。
 
-## Canvas
+## フロントエンド
 
-Owns visual node, edge, selection, and viewport state. It renders the graph and handles canvas interactions, but does not directly mutate the operating system filesystem.
+- グラフィカルワークスペースだけを担当する
+- DOM 要素でノード、SVG でエッジを描画する
+- ズーム、パン、入力操作を扱う
+- ネイティブ ES Modules を使い、ビルド工程や CDN 依存を持たない
+- バックエンドとは HTTP/JSON だけで通信する
+- ファイルシステムへ直接アクセスしない
 
-## Workspace
+## バックエンド
 
-Owns the user's layout and persistent workspace state. It will connect filesystem identities to saved node positions and other workspace preferences without redefining the filesystem hierarchy.
+- 実ファイルシステムに対する唯一の権限を持つ
+- 将来、ファイルシステム監視を行う
+- ワークスペースを永続化する
+- Python 標準ライブラリの `sqlite3` で SQLite を利用する
+- UI の描画や入力処理を担当しない
+- HTTP ルーティングとファイルシステム操作の設計を分離する
 
-## Filesystem
+## ファイルシステム境界
 
-Owns actual operating system filesystem operations. It will expose carefully scoped Rust-backed operations such as reading directories and, in later phases, rename, move, copy, and delete.
+将来は選択済みルート配下の走査、名前変更、移動、コピー、削除を提供します。破壊的操作は必ずバックエンドが制御・検証し、ブラウザーから任意パスを読み取る汎用 API やコマンド実行 API は設けません。
 
-Keeping these boundaries separate allows visual layout changes to remain independent from real filesystem changes while avoiding premature implementation details.
+現時点の API は `GET /api/health` のみです。ファイルシステム API と SQLite 永続化はまだ実装しません。
 
+## localhost セキュリティ境界
+
+データと権限の流れは **ブラウザー UI → localhost API → ファイルシステム権限** に限定します。サーバーはループバックインターフェースだけで待ち受け、ローカルの `Host` を検証します。将来の `POST`、`PUT`、`PATCH`、`DELETE` は NodeFileManager の localhost Origin も検証し、ワイルドカード CORS を許可しません。
+
+破壊的なファイル操作は用途別の明示的なエンドポイントだけで提供します。バックエンドは選択・許可済みルートを検証し、その外側のパスを拒否しなければなりません。任意のシェルコマンドを受け取る API は設けません。
+
+## 次の検証: Folder Selection Spike
+
+次の開発ステップでは、企業 Windows 上の Python バックエンドからネイティブなフォルダー選択ダイアログを表示する、最も信頼できる方法を検証します。まだ実装は行いません。
+
+1. 企業配布版 Python 3.14 に Tcl/Tk が含まれる場合は、標準ライブラリの `tkinter.filedialog` を評価する。
+2. `tkinter` が利用できない場合は、Windows ネイティブのフォールバックを評価する。
+3. 手動パス入力は診断用フォールバックに限定し、意図する UX にはしない。
+
+ブラウザーの File System Access API は主要アーキテクチャにしません。ファイルシステム権限を Python バックエンドに保持する必要があり、企業の Edge ポリシーでブラウザー側 API が制限される可能性があるためです。

@@ -1,0 +1,17 @@
+[package]
+name = "node-file-manager"
+version = "0.1.0"
+description = "A spatial desktop file manager"
+authors = ["NodeFileManager contributors"]
+edition = "2021"
+
+[lib]
+name = "node_file_manager_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+

@@ -12,20 +12,45 @@ export class FolderCanvas {
     this.canvas.addEventListener("wheel", (event) => this.zoom(event), { passive: false });
   }
 
-  restore(state, availableRootIds) {
+  async restore(state, availableRoots) {
     this.viewport = { x: 0, y: 0, zoom: 1, ...(state.viewport || {}) };
     const savedNodes = state.nodes || {};
-    const hasAvailableRoot = (node) => {
-      const visited = new Set();
-      while (node?.parentId && !visited.has(node.id)) {
-        visited.add(node.id); node = savedNodes[node.parentId];
-      }
-      return Boolean(node && availableRootIds.has(node.id));
-    };
-    for (const saved of Object.values(savedNodes)) {
-      if (hasAvailableRoot(saved)) this.nodes.set(saved.id, { ...saved });
+    this.nodes.clear();
+    for (const [index, root] of availableRoots.entries()) {
+      const saved = savedNodes[root.id];
+      this.nodes.set(root.id, {
+        ...root,
+        x: saved?.x ?? index * 220,
+        y: saved?.y ?? 80,
+        expanded: false,
+        childrenLoaded: false,
+      });
     }
     this.render();
+    for (const root of availableRoots) await this.restoreExpanded(root.id, savedNodes);
+    this.render();
+    this.changed();
+  }
+
+  async restoreExpanded(id, savedNodes) {
+    const saved = savedNodes[id];
+    const parent = this.nodes.get(id);
+    if (!saved?.expanded || !parent?.hasChildren) return;
+    const children = await this.loadChildren(id);
+    const positions = childPositions(parent, children.length);
+    for (const [index, child] of children.entries()) {
+      const savedChild = savedNodes[child.id];
+      this.nodes.set(child.id, {
+        ...child,
+        x: savedChild?.x ?? positions[index].x,
+        y: savedChild?.y ?? positions[index].y,
+        expanded: false,
+        childrenLoaded: false,
+      });
+    }
+    parent.childrenLoaded = true;
+    parent.expanded = true;
+    for (const child of children) await this.restoreExpanded(child.id, savedNodes);
   }
 
   addRoot(folder) {
@@ -80,7 +105,8 @@ export class FolderCanvas {
   }
 
   startPan(event) {
-    if (event.target !== this.canvas || event.button !== 0) return;
+    const isNodeInteraction = event.target.closest?.(".folder-node");
+    if (isNodeInteraction || event.button !== 0) return;
     this.canvas.setPointerCapture(event.pointerId); this.canvas.classList.add("panning");
     const startX = event.clientX, startY = event.clientY, x = this.viewport.x, y = this.viewport.y;
     const move = (moveEvent) => { this.viewport.x = x + moveEvent.clientX - startX; this.viewport.y = y + moveEvent.clientY - startY; this.render(); };
@@ -98,7 +124,10 @@ export class FolderCanvas {
   screenToWorld(x, y) { return { x: (x - this.viewport.x) / this.viewport.zoom, y: (y - this.viewport.y) / this.viewport.zoom }; }
   changed() { this.onChange(this.serialize()); }
   serialize() {
-    const nodes = Object.fromEntries([...this.nodes].map(([id, node]) => [id, node]));
+    const nodes = Object.fromEntries([...this.nodes].map(([id, node]) => {
+      const { childrenLoaded, ...persistentNode } = node;
+      return [id, persistentNode];
+    }));
     const roots = [...this.nodes.values()].filter((node) => !node.parentId).map(({ id, path }) => ({ id, path }));
     return { version: 1, roots, nodes, viewport: this.viewport };
   }

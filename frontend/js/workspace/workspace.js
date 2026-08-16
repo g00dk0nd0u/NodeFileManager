@@ -2,7 +2,7 @@ import { loadWorkspace, saveWorkspace } from "../api/client.js";
 
 export async function restoreWorkspace(canvas) {
   const { state, availableRoots } = await loadWorkspace();
-  canvas.restore(state, new Set(availableRoots.map((root) => root.id)));
+  await canvas.restore(state, availableRoots);
   const missing = (state.roots || []).length - availableRoots.length;
   return missing > 0 ? `${missing} 件の保存済みルートを復元できませんでした` : "ワークスペースを復元しました";
 }

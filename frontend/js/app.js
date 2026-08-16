@@ -11,12 +11,13 @@ const canvas = new FolderCanvas(document.querySelector("#canvas"), save, async (
   catch (error) { showError(error); throw error; }
 });
 function renderNavigation(state) {
-  const favoritePaths = new Set(state.favorites.map((item) => item.path));
-  for (const node of canvas.nodes.values()) node.favorite = favoritePaths.has(node.path);
+  const locationKey = (path) => navigator.userAgent.includes("Windows") ? path.toLocaleLowerCase() : path;
+  const favoritePaths = new Set(state.favorites.map((item) => locationKey(item.path)));
+  canvas.updateFavoriteStates(favoritePaths, locationKey);
   const chips = (items, favorite) => items.map((item) => { const chip = document.createElement("span"); chip.className = `quick-chip${item.available ? "" : " unavailable"}`; chip.title = item.path;
     const open = document.createElement("button"); open.type = "button"; open.className = "quick-remove"; open.style.padding = "0"; open.textContent = item.name; open.disabled = !item.available; open.addEventListener("click", () => navigateEntry(item.id)); chip.append(open);
     if (favorite) { const remove = document.createElement("button"); remove.type = "button"; remove.className = "quick-remove"; remove.textContent = "×"; remove.title = "Favorite を削除"; remove.addEventListener("click", async () => renderNavigation(await removeFavorite(item.id))); chip.append(remove); } return chip; });
-  document.querySelector("#favorites").replaceChildren(...chips(state.favorites, true)); document.querySelector("#hot").replaceChildren(...chips(state.hot, false)); canvas.render();
+  document.querySelector("#favorites").replaceChildren(...chips(state.favorites, true)); document.querySelector("#hot").replaceChildren(...chips(state.hot, false));
 }
 async function navigateEntry(id) { try { const result = await openNavigation(id); renderNavigation(result); if (!canvas.revealNode(result.folder.id)) await canvas.addRoot(result.folder); status.textContent = `移動: ${result.folder.path}`; } catch (error) { showError(error); renderNavigation(await getNavigation()); } }
 canvas.actions.favorite = async (id) => { try { renderNavigation(await toggleFavorite(id)); } catch (error) { showError(error); } };

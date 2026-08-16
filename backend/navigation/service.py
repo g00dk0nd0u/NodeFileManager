@@ -9,11 +9,12 @@ from pathlib import Path
 
 from backend.filesystem.directory_service import DirectoryService
 from backend.filesystem.roots import RootRegistry
+from .locations import canonical_location
 from .store import MAX_USAGE, QuickAccessStore
 
 
-def navigation_id(path: Path) -> str:
-    return "nav_" + hashlib.sha256(str(path).casefold().encode()).hexdigest()[:24]
+def navigation_id(path: str | Path) -> str:
+    return "nav_" + hashlib.sha256(canonical_location(path).encode()).hexdigest()[:24]
 
 
 class NavigationService:
@@ -21,16 +22,16 @@ class NavigationService:
         self.roots, self.directories, self.store, self.clock = roots, directories, store or QuickAccessStore(), clock
 
     def _entry(self, item: dict[str, object], favorite: bool) -> dict[str, object]:
-        path = Path(str(item["path"])); available = path.is_dir()
-        return {"id": item.get("id") or navigation_id(path), "name": path.name or str(path),
+        path = Path(canonical_location(str(item["path"]))); available = path.is_dir()
+        return {"id": navigation_id(path), "name": path.name or str(path),
                 "path": str(path), "available": available, "favorite": favorite}
 
     def state(self, hot_limit: int = 8) -> dict[str, object]:
         state = self.store.load(); favorites = [self._entry(item, True) for item in state["favorites"]]
-        excluded = {str(Path(item["path"])) .casefold() for item in state["favorites"]}
+        excluded = {canonical_location(str(item["path"])) for item in state["favorites"]}
         now = self.clock(); ranked = []
         for item in state["usage"].values():
-            if str(Path(item["path"])).casefold() in excluded: continue
+            if canonical_location(str(item["path"])) in excluded: continue
             age_days = max(0, now - float(item["lastUsed"])) / 86400
             score = math.log2(int(item["count"]) + 1) * math.exp(-age_days / 14)
             ranked.append((score, str(item["path"]), item))
@@ -39,24 +40,24 @@ class NavigationService:
 
     def toggle(self, authorized_id: str) -> dict[str, object]:
         path = self.roots.get(authorized_id)
-        nav_id = navigation_id(path)
+        location = canonical_location(path); nav_id = navigation_id(location)
         def mutate(state):
-            matches = [item for item in state["favorites"] if item["id"] == nav_id]
-            if matches: state["favorites"] = [item for item in state["favorites"] if item["id"] != nav_id]
-            else: state["favorites"].append({"id": nav_id, "path": str(path)})
+            matches = [item for item in state["favorites"] if canonical_location(item["path"]) == location]
+            if matches: state["favorites"] = [item for item in state["favorites"] if canonical_location(item["path"]) != location]
+            else: state["favorites"].append({"id": nav_id, "path": location})
             return not matches
         favorite = self.store.update(mutate)
         return {"favorite": favorite, **self.state()}
 
     def remove(self, nav_id: str) -> dict[str, object]:
-        self.store.update(lambda state: state.update(favorites=[item for item in state["favorites"] if item["id"] != nav_id]))
+        self.store.update(lambda state: state.update(favorites=[item for item in state["favorites"] if navigation_id(item["path"]) != nav_id]))
         return self.state()
 
     def visit_path(self, path: Path) -> None:
-        now = self.clock(); key = navigation_id(path)
+        now = self.clock(); location = canonical_location(path); key = navigation_id(location)
         def mutate(state):
-            current = state["usage"].get(key, {"path": str(path), "count": 0, "lastUsed": now})
-            current.update(path=str(path), count=min(int(current["count"]) + 1, 1_000_000), lastUsed=now)
+            current = state["usage"].get(key, {"path": location, "count": 0, "lastUsed": now})
+            current.update(path=location, count=min(int(current["count"]) + 1, 1_000_000), lastUsed=now)
             state["usage"][key] = current
             if len(state["usage"]) > MAX_USAGE:
                 keep = sorted(state["usage"], key=lambda ident: state["usage"][ident]["lastUsed"], reverse=True)[:MAX_USAGE]
@@ -68,17 +69,22 @@ class NavigationService:
 
     def open(self, nav_id: str) -> dict[str, object]:
         state = self.store.load(); candidates = list(state["favorites"]) + list(state["usage"].values())
-        item = next((item for item in candidates if (item.get("id") or navigation_id(Path(item["path"]))) == nav_id), None)
+        item = next((item for item in candidates if navigation_id(item["path"]) == nav_id), None)
         if item is None: raise PermissionError("Navigation entry is not available")
         path = Path(item["path"])
         if not path.is_dir(): raise FileNotFoundError("Favorite or HOT folder is unavailable")
         folder = self.directories.select(str(path)); self.visit_path(path)
         return {"folder": folder, **self.state()}
 
-    def migrate(self, old: Path, new: Path) -> None:
+    def migrate(self, old: str | Path, new: str | Path) -> None:
+        old_path, new_path = Path(canonical_location(old)), Path(canonical_location(new))
         def moved(value: str) -> str:
-            path = Path(value)
-            return str(new / path.relative_to(old)) if path == old or old in path.parents else value
+            path = Path(canonical_location(value))
+            try:
+                relative = path.relative_to(old_path)
+            except ValueError:
+                return canonical_location(path)
+            return canonical_location(new_path / relative)
         def mutate(state):
             for item in state["favorites"]: item["path"] = moved(item["path"]); item["id"] = navigation_id(Path(item["path"]))
             rebuilt = {}

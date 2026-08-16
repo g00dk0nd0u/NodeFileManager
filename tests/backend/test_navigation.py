@@ -8,7 +8,9 @@ import unittest
 from pathlib import Path
 
 from backend.filesystem.directory_service import DirectoryService
+from backend.filesystem.operations import FileOperations
 from backend.filesystem.roots import RootRegistry
+from backend.navigation.locations import canonical_location
 from backend.navigation.search import NavigationSearch
 from backend.navigation.service import NavigationService
 from backend.navigation.store import MAX_USAGE, QuickAccessStore
@@ -30,7 +32,7 @@ class NavigationTest(unittest.TestCase):
 
     def test_favorite_add_remove_and_authorization(self):
         path, folder = self.folder(); result = self.service.toggle(folder["id"])
-        self.assertTrue(result["favorite"]); self.assertEqual(result["favorites"][0]["path"], str(path.resolve()))
+        self.assertTrue(result["favorite"]); self.assertEqual(result["favorites"][0]["path"], canonical_location(path))
         self.assertFalse(self.service.toggle(folder["id"])["favorite"])
         with self.assertRaises(PermissionError): self.service.toggle("arbitrary")
 
@@ -38,7 +40,7 @@ class NavigationTest(unittest.TestCase):
         path, folder = self.folder(); self.service.toggle(folder["id"])
         fresh_roots = RootRegistry(); fresh = NavigationService(fresh_roots, DirectoryService(fresh_roots), QuickAccessStore(self.store.path), lambda: self.now)
         entry = fresh.state()["favorites"][0]; reopened = fresh.open(entry["id"])
-        self.assertEqual(reopened["folder"]["path"], str(path.resolve()))
+        self.assertEqual(canonical_location(reopened["folder"]["path"]), canonical_location(path))
 
     def test_unavailable_favorite_is_reported_and_removable(self):
         path, folder = self.folder(); entry = self.service.toggle(folder["id"])["favorites"][0]; path.rmdir()
@@ -66,7 +68,23 @@ class NavigationTest(unittest.TestCase):
     def test_migrate_updates_favorite_descendants(self):
         root, metadata = self.folder(); child = root / "child"; child.mkdir(); child_meta = self.directories.metadata(child)
         self.service.toggle(child_meta["id"]); moved = self.base / "moved"; root.rename(moved); self.service.migrate(root, moved)
-        self.assertEqual(self.service.state()["favorites"][0]["path"], str(moved / "child"))
+        self.assertEqual(self.service.state()["favorites"][0]["path"], canonical_location(moved / "child"))
+
+    def test_file_operation_rename_migrates_favorite_descendant(self):
+        root, metadata = self.folder(); child = root / "child"; child.mkdir()
+        self.service.toggle(self.directories.metadata(child)["id"])
+        operations = FileOperations(self.roots, self.directories, self.service.migrate)
+        renamed = operations.rename(metadata["id"], "renamed")
+        self.assertEqual(
+            self.service.state()["favorites"][0]["path"],
+            canonical_location(Path(renamed["path"]) / "child"),
+        )
+
+    def test_migrate_does_not_match_same_prefix_sibling(self):
+        root, _ = self.folder("foo"); sibling, sibling_meta = self.folder("foobar")
+        self.service.toggle(sibling_meta["id"])
+        self.service.migrate(root, self.base / "renamed")
+        self.assertEqual(self.service.state()["favorites"][0]["path"], canonical_location(sibling))
 
     def test_search_only_authorized_roots_and_result_limit(self):
         root, _ = self.folder(); outside, _ = self.folder("outside")

@@ -97,9 +97,18 @@ export class FolderCanvas {
   revealNode(id) {
     const node = this.nodes.get(id); if (!node) return false;
     this.clearSelection(); this.selected = id;
+    this.elements.get(id)?.classList.add("selected");
     this.viewport.x = this.canvas.clientWidth / 2 - (node.x + 120) * this.viewport.zoom;
     this.viewport.y = this.canvas.clientHeight / 2 - (node.y + 50) * this.viewport.zoom;
-    this.updateViewport(); this.render(); this.canvas.focus(); return true;
+    this.updateViewport(); this.canvas.focus(); return true;
+  }
+
+  updateFavoriteStates(paths, locationKey = (path) => path) {
+    for (const [id, node] of this.nodes) {
+      node.favorite = paths.has(locationKey(node.path));
+      const button = this.elements.get(id)?.querySelector(".node-favorite");
+      if (button) button.textContent = node.favorite ? "★" : "☆";
+    }
   }
 
   layoutTree(parentId) {

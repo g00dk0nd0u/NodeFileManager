@@ -1,6 +1,8 @@
 :root {
-  color-scheme: light dark;
-  font-family: system-ui, sans-serif;
+  color-scheme: dark;
+  font-family: Inter, "Segoe UI", system-ui, sans-serif;
+  background: #191b1f;
+  color: #d7d9dc;
 }
 
 body {
@@ -8,7 +10,17 @@ body {
 }
 
 main {
-  margin: 4rem auto;
-  max-width: 48rem;
-  padding: 0 1.5rem;
+  height: 100vh;
+  overflow: hidden;
 }
+
+button { font: inherit; }
+
+.toolbar {
+  box-sizing: border-box; height: 46px; display: flex; align-items: center; gap: 16px;
+  padding: 0 14px; background: #25282d; border-bottom: 1px solid #101114; position: relative; z-index: 5;
+}
+.toolbar h1 { font-size: 14px; letter-spacing: .02em; margin: 0; }
+.toolbar button { border: 1px solid #555b64; border-radius: 5px; padding: 5px 10px; background: #343941; color: #f2f3f5; cursor: pointer; }
+.toolbar button:hover { background: #414751; }
+#status { color: #9da3ab; font-size: 12px; margin-left: auto; max-width: 50vw; }

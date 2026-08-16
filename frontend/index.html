@@ -8,9 +8,17 @@
     <link rel="stylesheet" href="/css/canvas.css">
   </head>
   <body>
-    <main>
-      <h1>NodeFileManager</h1>
-      <p id="backend-status" role="status">バックエンドに接続しています…</p>
+    <main id="workspace" aria-label="フォルダーワークスペース">
+      <header class="toolbar">
+        <h1>NodeFileManager</h1>
+        <button id="select-folder" type="button">＋ Select Folder</button>
+        <span id="status" role="status">起動しています…</span>
+      </header>
+      <section id="canvas" tabindex="0">
+        <svg id="edges" aria-hidden="true"><g></g></svg>
+        <div id="world"></div>
+        <p id="empty-hint">Select Folder からフォルダーを追加してください<br><small>ドラッグ: ノード移動　背景ドラッグ: パン　ホイール: ズーム</small></p>
+      </section>
     </main>
     <script type="module" src="/js/app.js"></script>
   </body>

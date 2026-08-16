@@ -68,7 +68,7 @@ export class FolderCanvas {
   }
 
   render() {
-    applyViewport(this.world, this.canvas.querySelector("#edges"), this.viewport);
+    this.updateViewport();
     const visible = new Map([...this.nodes].filter(([, node]) => this.isVisible(node)));
     for (const [id, element] of this.elements) if (!visible.has(id)) { element.remove(); this.elements.delete(id); }
     for (const [id, node] of visible) {
@@ -114,6 +114,7 @@ export class FolderCanvas {
   updatePreview(id) { const node = this.nodes.get(id), element = this.elements.get(id); if (!node || !element) return; updatePreviewElement(element, node, this.handlers()); this.previewResized(id); }
   previewResized(id) { const node = this.nodes.get(id), element = this.elements.get(id); if (!node || !element) return; node.renderedHeight = element.offsetHeight; this.layoutTree(id); this.updatePositions(); }
   updatePositions() { for (const [id, element] of this.elements) { const node = this.nodes.get(id); if (node) element.style.transform = `translate(${node.x}px, ${node.y}px)`; } }
+  updateViewport() { applyViewport(this.world, this.canvas.querySelector("#edges"), this.viewport); }
 
   selectFolder(id) { this.clearSelection(); this.selected = id; this.elements.get(id)?.classList.add("selected"); }
 
@@ -173,7 +174,7 @@ export class FolderCanvas {
     const dx = event.clientX - session.startX, dy = event.clientY - session.startY;
     if (!session.dragging && Math.hypot(dx, dy) < 5) return;
     if (!session.dragging) { session.dragging = true; this.selectFolder(session.nodeId); }
-    for (const [id, origin] of session.origins) { const member = this.nodes.get(id); if (member) { member.x = origin.x + dx / this.viewport.zoom; member.y = origin.y + dy / this.viewport.zoom; } } this.render();
+    for (const [id, origin] of session.origins) { const member = this.nodes.get(id); if (member) { member.x = origin.x + dx / this.viewport.zoom; member.y = origin.y + dy / this.viewport.zoom; } } this.updatePositions();
   }
 
   endDrag(event) {
@@ -190,7 +191,7 @@ export class FolderCanvas {
     if (session.element.hasPointerCapture?.(session.pointerId)) session.element.releasePointerCapture(session.pointerId);
     if (savePosition && session.dragging) this.changed();
     else if (session.dragging) {
-      for (const [id, origin] of session.origins) { const node = this.nodes.get(id); if (node) { node.x = origin.x; node.y = origin.y; } } this.render();
+      for (const [id, origin] of session.origins) { const node = this.nodes.get(id); if (node) { node.x = origin.x; node.y = origin.y; } } this.updatePositions();
     }
   }
 
@@ -207,7 +208,7 @@ export class FolderCanvas {
     if (isNodeInteraction || event.button !== 0) return;
     this.canvas.setPointerCapture(event.pointerId); this.canvas.classList.add("panning");
     const startX = event.clientX, startY = event.clientY, x = this.viewport.x, y = this.viewport.y;
-    const move = (moveEvent) => { this.viewport.x = x + moveEvent.clientX - startX; this.viewport.y = y + moveEvent.clientY - startY; this.render(); };
+    const move = (moveEvent) => { this.viewport.x = x + moveEvent.clientX - startX; this.viewport.y = y + moveEvent.clientY - startY; this.updateViewport(); };
     const end = () => { this.canvas.removeEventListener("pointermove", move); this.canvas.classList.remove("panning"); this.changed(); };
     this.canvas.addEventListener("pointermove", move); this.canvas.addEventListener("pointerup", end, { once: true });
   }
@@ -216,7 +217,7 @@ export class FolderCanvas {
     event.preventDefault(); const rect = this.canvas.getBoundingClientRect(); const sx = event.clientX - rect.left, sy = event.clientY - rect.top;
     const old = this.viewport.zoom, next = Math.min(2.5, Math.max(.25, old * Math.exp(-event.deltaY * .001)));
     this.viewport.x = sx - (sx - this.viewport.x) * next / old; this.viewport.y = sy - (sy - this.viewport.y) * next / old; this.viewport.zoom = next;
-    this.render(); this.changed();
+    this.updateViewport(); this.changed();
   }
 
   screenToWorld(x, y) { return { x: (x - this.viewport.x) / this.viewport.zoom, y: (y - this.viewport.y) / this.viewport.zoom }; }

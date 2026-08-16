@@ -85,12 +85,21 @@ export class FolderCanvas {
 
   async loadNode(node) { const contents = await this.loadChildren(node.id); node.folders = contents.folders; node.files = contents.files; node.childrenLoaded = true; }
 
-  handlers() { return { folder: (parentId, folder) => this.openChild(parentId, folder), close: (id) => this.closeNode(id), newFolder: (id) => this.actions.newFolder?.(id), preview: (ownerId, file) => this.preview(ownerId, file), closePreview: (id) => this.closePreview(id), previewPage: (id, delta) => this.previewPage(id, delta), previewResized: (id) => this.previewResized(id), drag: (event, id) => this.startDrag(event, id), selectFolder: (id) => this.selectFolder(id), selectFile: (file, element) => this.selectFile(file, element), open: (id) => this.actions.open?.(id), rename: () => this.actions.rename?.(), drop: (event, id) => this.actions.transfer?.(event.dataTransfer.getData("application/x-nodefilemanager-item"), id, event.altKey) }; }
+  handlers() { return { folder: (parentId, folder) => this.openChild(parentId, folder), close: (id) => this.closeNode(id), favorite: (id) => this.actions.favorite?.(id), newFolder: (id) => this.actions.newFolder?.(id), preview: (ownerId, file) => this.preview(ownerId, file), closePreview: (id) => this.closePreview(id), previewPage: (id, delta) => this.previewPage(id, delta), previewResized: (id) => this.previewResized(id), drag: (event, id) => this.startDrag(event, id), selectFolder: (id) => this.selectFolder(id), selectFile: (file, element) => this.selectFile(file, element), open: (id) => this.actions.open?.(id), rename: () => this.actions.rename?.(), drop: (event, id) => this.actions.transfer?.(event.dataTransfer.getData("application/x-nodefilemanager-item"), id, event.altKey) }; }
 
   async openChild(parentId, folder) {
     if (this.nodes.has(folder.id)) { this.removeBranch(folder.id); this.render(); this.layoutTree(parentId); this.render(); this.changed(); return; }
     const parent = this.nodes.get(parentId); const child = { ...folder, parentId, childrenLoaded: false, x: parent.x, y: parent.y + 160 };
     this.nodes.set(folder.id, child); await this.loadNode(child); this.render(); this.layoutTree(parentId); this.render(); this.changed();
+    this.actions.visit?.(folder.id);
+  }
+
+  revealNode(id) {
+    const node = this.nodes.get(id); if (!node) return false;
+    this.clearSelection(); this.selected = id;
+    this.viewport.x = this.canvas.clientWidth / 2 - (node.x + 120) * this.viewport.zoom;
+    this.viewport.y = this.canvas.clientHeight / 2 - (node.y + 50) * this.viewport.zoom;
+    this.updateViewport(); this.render(); this.canvas.focus(); return true;
   }
 
   layoutTree(parentId) {

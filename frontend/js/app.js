@@ -1,4 +1,4 @@
-import { cancelFolderBrowser, confirmFolderBrowser, copyItem, createFolder, getChildren, getHealth, moveItem, navigateFolderBrowser, openFile, quitApplication, renameItem, startFolderBrowser } from "./api/client.js";
+import { activateSearch, cancelFolderBrowser, confirmFolderBrowser, copyItem, createFolder, getChildren, getHealth, getNavigation, moveItem, navigateFolderBrowser, openFile, openNavigation, quitApplication, removeFavorite, renameItem, searchNames, startFolderBrowser, toggleFavorite, visitFolder } from "./api/client.js";
 import { FolderCanvas } from "./canvas/canvas.js";
 import { createWorkspaceSaver, restoreWorkspace } from "./workspace/workspace.js";
 
@@ -10,6 +10,17 @@ const canvas = new FolderCanvas(document.querySelector("#canvas"), save, async (
   try { const result = await getChildren(id); status.textContent = `${result.folders.length} フォルダー / ${result.files.length} ファイル`; return result; }
   catch (error) { showError(error); throw error; }
 });
+function renderNavigation(state) {
+  const favoritePaths = new Set(state.favorites.map((item) => item.path));
+  for (const node of canvas.nodes.values()) node.favorite = favoritePaths.has(node.path);
+  const chips = (items, favorite) => items.map((item) => { const chip = document.createElement("span"); chip.className = `quick-chip${item.available ? "" : " unavailable"}`; chip.title = item.path;
+    const open = document.createElement("button"); open.type = "button"; open.className = "quick-remove"; open.style.padding = "0"; open.textContent = item.name; open.disabled = !item.available; open.addEventListener("click", () => navigateEntry(item.id)); chip.append(open);
+    if (favorite) { const remove = document.createElement("button"); remove.type = "button"; remove.className = "quick-remove"; remove.textContent = "×"; remove.title = "Favorite を削除"; remove.addEventListener("click", async () => renderNavigation(await removeFavorite(item.id))); chip.append(remove); } return chip; });
+  document.querySelector("#favorites").replaceChildren(...chips(state.favorites, true)); document.querySelector("#hot").replaceChildren(...chips(state.hot, false)); canvas.render();
+}
+async function navigateEntry(id) { try { const result = await openNavigation(id); renderNavigation(result); if (!canvas.revealNode(result.folder.id)) await canvas.addRoot(result.folder); status.textContent = `移動: ${result.folder.path}`; } catch (error) { showError(error); renderNavigation(await getNavigation()); } }
+canvas.actions.favorite = async (id) => { try { renderNavigation(await toggleFavorite(id)); } catch (error) { showError(error); } };
+canvas.actions.visit = async (id) => { try { renderNavigation(await visitFolder(id)); } catch (error) { showError(error); } };
 
 async function refresh() { try { await canvas.refresh(); status.textContent = "ファイルシステムから更新しました"; } catch (error) { showError(error); } }
 canvas.actions.open = async (id) => { try { await openFile(id); status.textContent = "ファイルを開きました"; } catch (error) { showError(error); } };
@@ -48,7 +59,7 @@ try {
     try { await save.flush(); status.textContent = "終了しています…"; await quitApplication(); }
     catch (error) { showError(error); }
   }); }
-  status.textContent = await restoreWorkspace(canvas);
+  status.textContent = await restoreWorkspace(canvas); renderNavigation(await getNavigation());
 } catch (error) { showError(error); }
 
 const selectFolderButton = document.querySelector("#select-folder");
@@ -71,3 +82,8 @@ let focusRefreshTimer;
 function refreshAfterFocus() { clearTimeout(focusRefreshTimer); focusRefreshTimer = setTimeout(() => { if (canvas.nodes.size && !document.hidden) refresh(); }, 350); }
 window.addEventListener("focus", refreshAfterFocus);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshAfterFocus(); });
+
+const searchInput = document.querySelector("#quick-search"), searchResults = document.querySelector("#search-results"); let searchTimer, searchGeneration = 0;
+function closeSearch() { searchGeneration += 1; clearTimeout(searchTimer); searchInput.value = ""; searchResults.hidden = true; searchResults.replaceChildren(); canvas.canvas.focus(); }
+searchInput.addEventListener("input", () => { clearTimeout(searchTimer); const query = searchInput.value.trim(), generation = ++searchGeneration; if (query.length < 2) { searchResults.hidden = true; return; } searchTimer = setTimeout(async () => { try { const response = await searchNames(query); if (generation !== searchGeneration) return; const rows = response.results.map((item) => { const button = document.createElement("button"); button.type = "button"; button.className = "search-result"; button.innerHTML = `<span>${item.kind === "folder" ? "📁" : "📄"}</span><strong></strong><span class="search-context"></span>`; button.querySelector("strong").textContent = item.name; button.querySelector(".search-context").textContent = item.context; button.addEventListener("click", async () => { try { const result = await activateSearch(item.id); renderNavigation(result); if (!canvas.revealNode(result.folder.id)) await canvas.addRoot(result.folder); if (result.fileId) { const node = canvas.nodes.get(result.folder.id), file = node?.files?.find((entry) => entry.id === result.fileId), row = canvas.elements.get(result.folder.id)?.querySelector(`[data-id="${CSS.escape(result.fileId)}"]`); if (file && row) { canvas.selectFile(file, row); canvas.preview(result.folder.id, file); } } searchResults.hidden = true; } catch (error) { showError(error); } }); return button; }); searchResults.replaceChildren(...rows); searchResults.hidden = false; status.textContent = `${response.results.length} 件${response.truncated ? "（上限到達）" : ""}`; } catch (error) { showError(error); } }, 250); });
+document.addEventListener("keydown", (event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); searchInput.focus(); searchInput.select(); } else if (event.key === "Escape" && (document.activeElement === searchInput || !searchResults.hidden)) { event.stopImmediatePropagation(); closeSearch(); } }, true);

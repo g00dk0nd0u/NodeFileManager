@@ -16,8 +16,9 @@ class FileOperationError(ValueError):
 
 
 class FileOperations:
-    def __init__(self, roots: RootRegistry, directories: DirectoryService) -> None:
+    def __init__(self, roots: RootRegistry, directories: DirectoryService, on_path_moved=None) -> None:
         self.roots, self.directories = roots, directories
+        self.on_path_moved = on_path_moved or (lambda old, new: None)
 
     @staticmethod
     def _validate_name(name: object) -> str:
@@ -102,6 +103,7 @@ class FileOperations:
             self._ensure_available(target)
             source.rename(target)
         self.roots.replace(source, target)
+        self.on_path_moved(source, target)
         parent_id = None if was_root else self.roots.remember(target.parent)
         return self.directories.metadata(target, parent_id)
 
@@ -135,4 +137,5 @@ class FileOperations:
         self._ensure_available(target)
         shutil.move(str(source), str(target))
         self.roots.replace(source, target)
+        self.on_path_moved(source, target)
         return self.directories.metadata(target, destination_id)

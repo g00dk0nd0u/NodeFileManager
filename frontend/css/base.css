@@ -36,3 +36,14 @@ dialog input { margin-left: 8px; padding: 6px; background: #343941; color: inher
 .folder-browser-folders { max-height: 45vh; overflow-y: auto; border: 1px solid #454b54; }
 .folder-browser-folders button { display: block; width: 100%; padding: 7px; border: 0; text-align: left; background: transparent; color: inherit; }
 .folder-browser-folders button:hover { background: #ffffff12; }
+.quick-access { height: 84px; box-sizing: border-box; padding: 5px 12px; display: grid; gap: 4px; background: #202329; border-bottom: 1px solid #101114; position: relative; z-index: 4; font-size: 11px; }
+.quick-search, .quick-row { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.quick-search label, .quick-row strong { color: #9298a0; width: 58px; flex: none; }
+#quick-search { width: min(440px, 55vw); padding: 3px 7px; border: 1px solid #4b515a; border-radius: 4px; color: #eee; background: #17191d; }
+.quick-chips { display: flex; gap: 5px; overflow-x: auto; min-width: 0; scrollbar-width: thin; }
+.quick-chip { display: flex; flex: none; align-items: center; border: 1px solid #454b54; border-radius: 10px; background: #30343a; color: #d8dadd; padding: 2px 7px; cursor: pointer; }
+.quick-chip.unavailable { color: #9a7373; border-color: #684747; }
+.quick-remove { border: 0; background: transparent; color: #999; padding: 0 0 0 5px; cursor: pointer; }
+#search-results { position: absolute; top: 29px; left: 77px; width: min(620px, calc(100vw - 100px)); max-height: 320px; overflow: auto; border: 1px solid #555b64; background: #25282d; box-shadow: 0 8px 20px #000b; }
+.search-result { display: grid; grid-template-columns: 22px 160px 1fr; width: 100%; border: 0; padding: 6px 8px; text-align: left; color: #ddd; background: transparent; cursor: pointer; }
+.search-result:hover { background: #ffffff12; } .search-context { color: #878d95; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

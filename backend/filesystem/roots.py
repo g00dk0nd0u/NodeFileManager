@@ -81,6 +81,10 @@ class RootRegistry:
         with self._lock:
             return resolved in self._roots
 
+    def authorized_roots(self) -> tuple[Path, ...]:
+        with self._lock:
+            return tuple(self._roots)
+
     def replace(self, old_path: Path, new_path: Path) -> None:
         """Keep authorization useful after an in-root rename or move."""
         old_path, new_path = old_path.resolve(), new_path.resolve()

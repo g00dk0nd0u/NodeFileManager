@@ -44,6 +44,15 @@ class FileOperationsTestCase(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             self.operations.rename(str(renamed["id"]), "occupied.txt")
 
+    def test_create_folder_validates_name_and_collision(self):
+        created = self.operations.create_folder(str(self.source_item["id"]), "Test_New")
+        self.assertTrue(Path(str(created["path"])).is_dir())
+        with self.assertRaises(FileExistsError):
+            self.operations.create_folder(str(self.source_item["id"]), "Test_New")
+        for name in ("", ".", "..", "bad/name", "bad\\name"):
+            with self.subTest(name=name), self.assertRaises(FileOperationError):
+                self.operations.create_folder(str(self.source_item["id"]), name)
+
     def test_copy_move_collisions_and_recursive_copy(self):
         copied = self.operations.copy(str(self.file_item["id"]), str(self.destination_item["id"])); self.assertEqual(Path(str(copied["path"])).read_text(), "content")
         with self.assertRaises(FileExistsError): self.operations.copy(str(self.file_item["id"]), str(self.destination_item["id"]))

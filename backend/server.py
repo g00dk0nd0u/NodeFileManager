@@ -75,6 +75,22 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
                 self._json(200, self.directories.contents(identifier))
             except (PermissionError, FileNotFoundError, NotADirectoryError) as error:
                 self._json(403, {"error": str(error)})
+        elif request.path == "/api/files/preview":
+            identifier = parse_qs(request.query).get("id", [""])[0]
+            try:
+                target = self.roots.path_for(identifier)
+                allowed = {".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
+                content_type = allowed.get(target.suffix.casefold())
+                if not target.is_file() or content_type is None:
+                    raise PermissionError("File type is not available for preview")
+                with target.open("rb") as source:
+                    size = target.stat().st_size
+                    self.send_response(200); self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Disposition", "inline"); self.send_header("Content-Length", str(size))
+                    self.send_header("Cache-Control", "private, no-cache"); self.end_headers()
+                    self.copyfile(source, self.wfile)
+            except (OSError, PermissionError) as error:
+                self._json(403, {"error": str(error)})
         elif request.path == "/api/workspace":
             state = self.workspace.load()
             # Re-authorize only stored roots that still exist; inaccessible roots remain
@@ -126,13 +142,15 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
             except (ValueError, OSError, PermissionError) as error:
                 self._operation_error(error)
             return
-        if path in {"/api/files/open", "/api/items/copy", "/api/items/move"}:
+        if path in {"/api/files/open", "/api/items/copy", "/api/items/move", "/api/folders/create"}:
             try:
                 body = self._read_json()
                 identifier = str(body.get("id", ""))
                 if path == "/api/files/open":
                     self.opener.open(identifier)
                     self._json(200, {"opened": True})
+                elif path == "/api/folders/create":
+                    self._json(200, {"folder": self.operations.create_folder(str(body.get("parentId", "")), body.get("name"))})
                 else:
                     destination_id = str(body.get("destinationId", ""))
                     operation = self.operations.copy if path.endswith("copy") else self.operations.move

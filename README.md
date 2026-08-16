@@ -21,7 +21,7 @@ NodeFileManager は、実フォルダーを自由配置できるノードとし�
 
 ## アーキテクチャと永続化
 
-- `frontend/`: HTML/CSS、ネイティブ ES Modules。DOM ノードと SVG エッジを描画
+- `frontend/`: HTML/CSS、ネイティブ ES Modules。接続されたフォルダーパネル、Kanban列、previewを描画
 - `backend/filesystem/`: ネイティブ選択ダイアログ、許可ルート、一覧、open、名前変更／コピー／移動
 - `backend/workspace/`: UI 状態をローカル JSON に原子的に保存
 - `backend/server.py`: Python 標準ライブラリだけの localhost HTTP API と静的配信
@@ -37,7 +37,7 @@ Windows では `%LOCALAPPDATA%\NodeFileManager\workspace.json`、その他では
 1. Python 3.14 を導入し、`py -3.14 -m tkinter` で Tk ダイアログが開くことを確認します。
 2. `scripts\start.cmd` をダブルクリックし、ブラウザーが自動表示されることを確認します。
 3. **Select Folder** で子フォルダーを持つ実フォルダーを選択します。
-4. 展開、エッジ表示、ノード移動、背景パン、ホイールズームを順に確認します。
+4. 親子パネルの接続、group移動、背景パン、ホイールズームを順に確認します。
 5. `Ctrl+C` で終了し、再度 `start.cmd` を実行してルート、展開、位置、パン、ズームが戻ることを確認します。
 6. 選択済みフォルダーを一時的に移動して再起動し、画面が停止せず復元不能件数を表示することを確認します。
 
@@ -66,7 +66,7 @@ macOS では `python3 -m backend.server` で起動し、上記 disposable フォ
 
 続けて **Select Folder → Node → Expand → Edges → Drag → Pan/Zoom → Close → Restart → Restore** の一連の操作を再確認します。
 
-回帰確認では、空の背景（グリッド、ノード間、エッジ付近）をドラッグすると viewport だけが動き、ノードや展開ボタンの操作では pan しないことを確認します。また、展開状態を保存して終了した後、外部で子フォルダーを一つ削除して別の子フォルダーを追加し、再起動時に削除済みノードが消えて追加済みノードが現在の階層に現れることを確認します。
+回帰確認では、空の背景をドラッグすると viewport だけが動き、folder panelの操作ではpanしないことを確認します。また、open child panelを保存して終了した後、外部で子フォルダーを削除・追加し、再起動またはRefresh時に現在の階層と一致することを確認します。PDF previewはbrowser native rendererと`#page=N`を使うため、page fragmentの挙動はSafari/Edgeの内蔵PDF viewerに依存し、総page数は表示しません。
 
 ## 既知の制限
 

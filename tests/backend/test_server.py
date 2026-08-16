@@ -127,6 +127,24 @@ class ServerTestCase(unittest.TestCase):
             thread.join(2)
         self.assertEqual(result[0][0], 200)
 
+    def test_preview_allows_only_authorized_whitelisted_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "image.png").write_bytes(b"png-data")
+            Path(directory, "notes.txt").write_text("private")
+            with patch.object(NodeFileManagerHandler, "picker", staticmethod(lambda: directory)):
+                _, body = self.request("POST", "/api/folders/select", origin="http://127.0.0.1:8000", body={})
+            root_id = json.loads(body)["folder"]["id"]
+            _, body = self.request("GET", f"/api/folders/children?id={root_id}")
+            files = {item["name"]: item for item in json.loads(body)["files"]}
+            status, body = self.request("GET", f"/api/files/preview?id={files['image.png']['id']}")
+            self.assertEqual((status, body), (200, b"png-data"))
+            connection = http.client.HTTPConnection(HOST, self.server.server_port)
+            connection.request("GET", f"/api/files/preview?id={files['image.png']['id']}", headers={"Host": "127.0.0.1:8000"})
+            response = connection.getresponse(); self.assertEqual(response.getheader("Content-Type"), "image/png")
+            self.assertEqual(response.getheader("Content-Disposition"), "inline"); response.read(); connection.close()
+            self.assertEqual(self.request("GET", f"/api/files/preview?id={files['notes.txt']['id']}")[0], 403)
+            self.assertEqual(self.request("GET", "/api/files/preview?id=unknown")[0], 403)
+
 
 class FilesystemAndWorkspaceTestCase(unittest.TestCase):
     def picker_result(self, stdout: str, returncode: int = 0, stderr: str = "") -> object:

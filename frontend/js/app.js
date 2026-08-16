@@ -1,4 +1,4 @@
-import { cancelFolderBrowser, confirmFolderBrowser, copyItem, getChildren, getHealth, moveItem, navigateFolderBrowser, openFile, renameItem, startFolderBrowser } from "./api/client.js";
+import { cancelFolderBrowser, confirmFolderBrowser, copyItem, createFolder, getChildren, getHealth, moveItem, navigateFolderBrowser, openFile, renameItem, startFolderBrowser } from "./api/client.js";
 import { FolderCanvas } from "./canvas/canvas.js";
 import { createWorkspaceSaver, restoreWorkspace } from "./workspace/workspace.js";
 
@@ -18,11 +18,11 @@ canvas.actions.rename = async () => {
   const name = prompt("新しい名前（同じフォルダー内）", item.name); if (name === null || name === item.name) return;
   try { const result = await renameItem(item.id, name); canvas.applyRename(item.id, result.item); canvas.selectedItem = null; await refresh(); } catch (error) { showError(error); }
 };
-canvas.actions.transfer = async (id, destinationId, copy = false) => { try { await (copy ? copyItem : moveItem)(id, destinationId); canvas.clearSelection(); await refresh(); status.textContent = copy ? "コピーしました" : "移動しました"; } catch (error) { showError(error); } };
+canvas.actions.transfer = async (id, destinationId, copy = false) => { try { const sourceId = canvas.selectedItem?.parentId; await (copy ? copyItem : moveItem)(id, destinationId); canvas.clearSelection(); if (sourceId) await canvas.refresh(sourceId); if (destinationId !== sourceId && canvas.nodes.has(destinationId)) await canvas.refresh(destinationId); status.textContent = copy ? "コピーしました" : "移動しました"; } catch (error) { showError(error); } };
 
 document.querySelector("#refresh").addEventListener("click", refresh);
 document.querySelector("#rename").addEventListener("click", () => canvas.actions.rename());
-const browserDialog = document.querySelector("#folder-browser-dialog"); let browserSession = null, browserGeneration = 0;
+const browserDialog = document.querySelector("#folder-browser-dialog"), newFolderDialog = document.querySelector("#new-folder-dialog"); let browserSession = null, browserGeneration = 0, newFolderParent = null;
 const browserButton = (label, id) => { const button = document.createElement("button"); button.type = "button"; button.textContent = label; button.addEventListener("click", () => navigateBrowser(id)); return button; };
 function showBrowser(view) {
   browserSession = view.sessionId; document.querySelector(".folder-browser-path").textContent = view.current.path;
@@ -31,8 +31,13 @@ function showBrowser(view) {
   document.querySelector(".folder-browser-folders").replaceChildren(...view.folders.map((item) => browserButton(`📁 ${item.name}`, item.id)));
 }
 async function navigateBrowser(id) { try { showBrowser(await navigateFolderBrowser(browserSession, id)); } catch (error) { showError(error); } }
-canvas.actions.dialogOpen = () => browserDialog.open;
-canvas.actions.cancelDialog = () => { if (browserDialog.open) browserDialog.close("cancel"); };
+canvas.actions.dialogOpen = () => browserDialog.open || newFolderDialog.open;
+canvas.actions.cancelDialog = () => { if (browserDialog.open) browserDialog.close("cancel"); if (newFolderDialog.open) newFolderDialog.close("cancel"); };
+canvas.actions.newFolder = (parentId) => { newFolderParent = parentId; document.querySelector("#new-folder-name").value = ""; newFolderDialog.showModal(); document.querySelector("#new-folder-name").focus(); };
+document.querySelector("#new-folder-confirm").addEventListener("click", async (event) => {
+  event.preventDefault(); const name = document.querySelector("#new-folder-name").value;
+  try { await createFolder(newFolderParent, name); newFolderDialog.close("confirm"); await canvas.refresh(newFolderParent); status.textContent = `フォルダーを作成しました: ${name}`; } catch (error) { showError(error); }
+});
 
 try {
   await getHealth();
@@ -54,3 +59,8 @@ document.querySelector("#folder-browser-confirm").addEventListener("click", asyn
 });
 browserDialog.addEventListener("click", (event) => { if (event.target === browserDialog) browserDialog.close("cancel"); });
 browserDialog.addEventListener("close", () => { browserGeneration += 1; const session = browserSession; browserSession = null; if (session) cancelFolderBrowser(session).catch(showError); });
+
+let focusRefreshTimer;
+function refreshAfterFocus() { clearTimeout(focusRefreshTimer); focusRefreshTimer = setTimeout(() => { if (canvas.nodes.size && !document.hidden) refresh(); }, 350); }
+window.addEventListener("focus", refreshAfterFocus);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshAfterFocus(); });

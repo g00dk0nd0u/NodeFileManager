@@ -117,6 +117,13 @@ class FileOperations:
             shutil.copy2(source, target)
         return self.directories.metadata(target, destination_id)
 
+    def create_folder(self, parent_id: str, name: object) -> dict[str, object]:
+        parent = self.roots.get(parent_id)
+        target = parent / self._validate_name(name)
+        self._ensure_available(target)
+        target.mkdir()
+        return self.directories.metadata(target, parent_id)
+
     def move(self, identifier: str, destination_id: str) -> dict[str, object]:
         source, destination = self.roots.path_for(identifier), self.roots.get(destination_id)
         if self.roots.is_root(source):

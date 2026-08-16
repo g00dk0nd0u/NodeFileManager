@@ -2,7 +2,7 @@
 
 ## 責務とデータフロー
 
-ブラウザー UI → localhost JSON API → Python ファイルシステム権限、という一方向の境界です。フロントエンドは DOM フォルダーノード、SVG エッジ、選択・ドラッグ・パン・ズームを担当します。座標変換は `viewport.js`、初回の子配置は `layout.js` に分離しています。
+ブラウザー UI → localhost JSON API → Python ファイルシステム権限、という一方向の境界です。フロントエンドは接続されたDOM folder panel、Kanban-style child columns、preview、選択・group drag・パン・ズームを担当します。filesystem hierarchyのwireは描画しません。
 
 Python は `tkinter.filedialog.askdirectory` を抽象化した picker からのみルートを追加します。picker は固定された `sys.executable -m backend.filesystem.folder_picker_child` を起動し、専用の短命プロセス内で Tk の生成から破棄までを完結させます。子は選択、キャンセル、エラーを JSON で返し、サーバーは終了コードと JSON を検証します。クラッシュ、不正応答、10 分のタイムアウトは API エラーとなり、タイムアウト時には標準ライブラリが子を kill して wait するため、長時間稼働するサーバーに Tk のモーダル状態が残りません。
 

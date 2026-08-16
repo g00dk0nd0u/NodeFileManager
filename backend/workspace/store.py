@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
+
+from backend.runtime_paths import user_data_directory
 
 
 def default_workspace_path() -> Path:
-    base = Path(os.environ.get("LOCALAPPDATA", Path.home() / ".nodefilemanager"))
-    return base / "NodeFileManager" / "workspace.json" if "LOCALAPPDATA" in os.environ else base / "workspace.json"
+    return user_data_directory() / "workspace.json"
 
 
 class WorkspaceStore:

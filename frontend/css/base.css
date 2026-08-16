@@ -24,6 +24,7 @@ button { font: inherit; }
 .toolbar button { border: 1px solid #555b64; border-radius: 5px; padding: 5px 10px; background: #343941; color: #f2f3f5; cursor: pointer; }
 .toolbar button:hover { background: #414751; }
 #status { color: #9da3ab; font-size: 12px; margin-left: auto; max-width: 50vw; }
+#build-identity { color: #777e87; font-size: 10px; white-space: nowrap; }
 dialog { width: min(520px, calc(100vw - 48px)); border: 1px solid #555b64; border-radius: 7px; background: #25282d; color: #f2f3f5; }
 dialog::backdrop { background: #0009; }
 dialog form { display: grid; gap: 12px; }

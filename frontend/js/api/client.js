@@ -5,6 +5,7 @@ async function request(path, options = {}) {
   return body;
 }
 export const getHealth = () => request("/api/health");
+export const quitApplication = () => request("/api/application/quit", { method: "POST", body: "{}" });
 export const startFolderBrowser = () => request("/api/folder-browser/start", { method: "POST", body: "{}" });
 export const navigateFolderBrowser = (sessionId, folderId) => request("/api/folder-browser/navigate", { method: "POST", body: JSON.stringify({ sessionId, folderId }) });
 export const confirmFolderBrowser = (sessionId) => request("/api/folder-browser/confirm", { method: "POST", body: JSON.stringify({ sessionId }) });

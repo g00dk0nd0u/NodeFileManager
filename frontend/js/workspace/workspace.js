@@ -8,9 +8,22 @@ export async function restoreWorkspace(canvas) {
 }
 
 export function createWorkspaceSaver(reportError) {
-  let timer;
-  return (state) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => saveWorkspace(state).catch(reportError), 250);
+  let timer, latestState, pending = Promise.resolve();
+  const persist = () => {
+    timer = undefined;
+    pending = pending.catch(() => {}).then(() => saveWorkspace(latestState));
+    return pending;
   };
+  const save = (state) => {
+    latestState = state;
+    clearTimeout(timer);
+    timer = setTimeout(() => persist().catch(reportError), 250);
+  };
+  save.flush = async () => {
+    clearTimeout(timer);
+    timer = undefined;
+    if (latestState !== undefined) await persist();
+    else await pending;
+  };
+  return save;
 }

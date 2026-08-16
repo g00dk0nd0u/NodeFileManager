@@ -113,7 +113,7 @@ class NavigationTest(unittest.TestCase):
         root, _ = self.folder(); parent = root / "parent"; parent.mkdir(); (parent / "needle.txt").write_text("ok")
         search = NavigationSearch(self.roots, self.directories); roots_before = self.roots.authorized_roots()
         result = search.activate(search.search("needle")["results"][0]["id"])
-        self.assertEqual(Path(result["folder"]["path"]), parent.resolve())
+        self.assertEqual(canonical_location(result["folder"]["path"]), canonical_location(parent))
         self.assertEqual(self.roots.authorized_roots(), roots_before)
 
     def test_search_activation_rejects_ancestor_symlink_escape_without_adding_root(self):

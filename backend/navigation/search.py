@@ -11,6 +11,19 @@ from pathlib import Path
 from backend.filesystem.directory_service import DirectoryService
 from backend.filesystem.roots import RootRegistry
 
+
+def file_identity(path: Path, is_folder: bool) -> tuple[int, int, bool, int | None, int | None]:
+    """Return a stable snapshot using the same resolved-path stat semantics."""
+    stat = os.stat(path, follow_symlinks=False)
+    return (
+        stat.st_dev,
+        stat.st_ino,
+        is_folder,
+        None if is_folder else stat.st_size,
+        None if is_folder else stat.st_mtime_ns,
+    )
+
+
 class NavigationSearch:
     def __init__(self, roots: RootRegistry, directories: DirectoryService, *, result_limit=50, scan_limit=10_000, time_limit=.35) -> None:
         self.roots, self.directories = roots, directories
@@ -40,10 +53,13 @@ class NavigationSearch:
                     except OSError: continue
                     if is_folder: stack.append(path)
                     if query not in entry.name.casefold(): continue
-                    try: signature = (entry.stat(follow_symlinks=False).st_dev, entry.stat(follow_symlinks=False).st_ino, is_folder)
-                    except OSError: continue
+                    try:
+                        resolved = self.roots.authorize_existing_descendant(path)
+                        signature = file_identity(resolved, is_folder)
+                    except (OSError, PermissionError):
+                        continue
                     token = secrets.token_urlsafe(18)
-                    with self._lock: self._tokens[token] = (path, signature)
+                    with self._lock: self._tokens[token] = (resolved, signature)
                     results.append({"id": token, "name": entry.name, "kind": "folder" if is_folder else "file", "context": str(path.parent)})
                     if len(results) >= self.result_limit: truncated = True; stack.clear(); break
         with self._lock:
@@ -54,13 +70,15 @@ class NavigationSearch:
         with self._lock: saved = self._tokens.pop(token, None)
         if saved is None: raise PermissionError("Search result is stale or unauthorized")
         path, signature = saved
-        try: stat = path.stat(follow_symlinks=False); current = (stat.st_dev, stat.st_ino, path.is_dir())
-        except OSError as error: raise FileNotFoundError("Search result is stale") from error
-        if current != signature or self._linked(path): raise PermissionError("Search result is stale or unsafe")
+        if self._linked(path): raise PermissionError("Search result is stale or unsafe")
         # Strict resolution revalidates every ancestor against the roots that
         # already existed when activated; a search token can never add a root.
         resolved = self.roots.authorize_existing_descendant(path)
         self.roots.authorize_existing_descendant(resolved.parent)
+        is_folder = resolved.is_dir()
+        try: current = file_identity(resolved, is_folder)
+        except OSError as error: raise FileNotFoundError("Search result is stale") from error
+        if current != signature: raise PermissionError("Search result is stale or unsafe")
         folder_path = resolved if resolved.is_dir() else resolved.parent
         folder = self.directories.metadata(folder_path)
         item_id = None if resolved.is_dir() else self.roots.remember(resolved)

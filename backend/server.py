@@ -205,8 +205,7 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
                     result = self.folder_browser.navigate(body.get("sessionId"), body.get("folderId"))
                 elif path.endswith("/confirm"):
                     folder = self.folder_browser.confirm(body.get("sessionId"))
-                    self.navigation.visit_authorized(str(folder["id"]))
-                    result = {"folder": folder}
+                    result = {"folder": folder, **self.navigation.visit_authorized(str(folder["id"]))}
                 elif path.endswith("/cancel"):
                     self.folder_browser.cancel(body.get("sessionId")); result = {"cancelled": True}
                 else:
@@ -251,8 +250,8 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
             try:
                 selected = self.picker()
                 folder = self.directories.select(selected) if selected else None
-                if folder: self.navigation.visit_authorized(str(folder["id"]))
-                self._json(200, {"folder": folder})
+                navigation = self.navigation.visit_authorized(str(folder["id"])) if folder else self.navigation.state()
+                self._json(200, {"folder": folder, **navigation})
             except FolderPickerUnavailable as error:
                 self._json(503, {"error": str(error), "code": "picker_failed"})
             except OSError as error:

@@ -105,7 +105,12 @@ class FileOperations:
             self._ensure_available(target)
             source.rename(target)
         self.roots.replace(source, target)
-        self.on_path_moved(old_location, new_location)
+        try:
+            self.on_path_moved(old_location, new_location)
+        except OSError:
+            # The real rename succeeded; optional Quick Access persistence is
+            # best-effort and must not misreport filesystem state.
+            pass
         parent_id = None if was_root else self.roots.remember(target.parent)
         return self.directories.metadata(target, parent_id)
 
@@ -141,5 +146,10 @@ class FileOperations:
         self._ensure_available(target)
         shutil.move(str(source), str(target))
         self.roots.replace(source, target)
-        self.on_path_moved(old_location, new_location)
+        try:
+            self.on_path_moved(old_location, new_location)
+        except OSError:
+            # The real move succeeded; optional Quick Access persistence is
+            # best-effort and must not misreport filesystem state.
+            pass
         return self.directories.metadata(target, destination_id)

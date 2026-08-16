@@ -109,5 +109,23 @@ class NavigationTest(unittest.TestCase):
         target.unlink(); target.mkdir()
         with self.assertRaises(PermissionError): search.activate(token)
 
+    def test_unchanged_search_activation_does_not_add_root(self):
+        root, _ = self.folder(); parent = root / "parent"; parent.mkdir(); (parent / "needle.txt").write_text("ok")
+        search = NavigationSearch(self.roots, self.directories); roots_before = self.roots.authorized_roots()
+        result = search.activate(search.search("needle")["results"][0]["id"])
+        self.assertEqual(Path(result["folder"]["path"]), parent.resolve())
+        self.assertEqual(self.roots.authorized_roots(), roots_before)
+
+    def test_search_activation_rejects_ancestor_symlink_escape_without_adding_root(self):
+        root, _ = self.folder(); parent = root / "parent"; parent.mkdir(); (parent / "needle.txt").write_text("ok")
+        search = NavigationSearch(self.roots, self.directories); token = search.search("needle")["results"][0]["id"]
+        outside = self.base / "outside"; outside.mkdir(); moved = outside / "parent"; parent.rename(moved)
+        try: parent.symlink_to(moved, target_is_directory=True)
+        except OSError as error: self.skipTest(f"symlinks unavailable: {error}")
+        roots_before = self.roots.authorized_roots()
+        with self.assertRaises(PermissionError): search.activate(token)
+        self.assertEqual(self.roots.authorized_roots(), roots_before)
+        with self.assertRaises(PermissionError): self.roots.authorize_existing_descendant(moved)
+
 
 if __name__ == "__main__": unittest.main()

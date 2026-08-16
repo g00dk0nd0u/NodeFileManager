@@ -28,9 +28,9 @@ canvas.actions.open = async (id) => { try { await openFile(id); status.textConte
 canvas.actions.rename = async () => {
   const item = canvas.selectedItem || canvas.nodes.get(canvas.selected); if (!item) return;
   const name = prompt("新しい名前（同じフォルダー内）", item.name); if (name === null || name === item.name) return;
-  try { const result = await renameItem(item.id, name); await canvas.applyRename(item.id, result.item); canvas.selectedItem = null; await refresh(); } catch (error) { showError(error); }
+  try { const result = await renameItem(item.id, name); await canvas.applyRename(item.id, result.item); canvas.selectedItem = null; renderNavigation(await getNavigation()); await refresh(); } catch (error) { showError(error); }
 };
-canvas.actions.transfer = async (id, destinationId, copy = false) => { try { const sourceId = canvas.selectedItem?.parentId; await (copy ? copyItem : moveItem)(id, destinationId); canvas.clearSelection(); if (sourceId) await canvas.refresh(sourceId); if (destinationId !== sourceId && canvas.nodes.has(destinationId)) await canvas.refresh(destinationId); status.textContent = copy ? "コピーしました" : "移動しました"; } catch (error) { showError(error); } };
+canvas.actions.transfer = async (id, destinationId, copy = false) => { try { const sourceId = canvas.selectedItem?.parentId; await (copy ? copyItem : moveItem)(id, destinationId); canvas.clearSelection(); if (!copy) renderNavigation(await getNavigation()); if (sourceId) await canvas.refresh(sourceId); if (destinationId !== sourceId && canvas.nodes.has(destinationId)) await canvas.refresh(destinationId); status.textContent = copy ? "コピーしました" : "移動しました"; } catch (error) { showError(error); } };
 
 document.querySelector("#refresh").addEventListener("click", refresh);
 document.querySelector("#rename").addEventListener("click", () => canvas.actions.rename());
@@ -74,7 +74,7 @@ selectFolderButton.addEventListener("click", async () => {
 });
 document.querySelector("#folder-browser-confirm").addEventListener("click", async (event) => {
   event.preventDefault(); if (!browserSession) return;
-  try { const session = browserSession; browserSession = null; const { folder } = await confirmFolderBrowser(session); browserDialog.close("confirm"); await canvas.addRoot(folder); status.textContent = `追加: ${folder.path}`; } catch (error) { showError(error); }
+  try { const session = browserSession; browserSession = null; const result = await confirmFolderBrowser(session); browserDialog.close("confirm"); await canvas.addRoot(result.folder); renderNavigation(result); status.textContent = `追加: ${result.folder.path}`; } catch (error) { showError(error); }
 });
 browserDialog.addEventListener("click", (event) => { if (event.target === browserDialog) browserDialog.close("cancel"); });
 browserDialog.addEventListener("close", () => { browserGeneration += 1; const session = browserSession; browserSession = null; if (session) cancelFolderBrowser(session).catch(showError); });

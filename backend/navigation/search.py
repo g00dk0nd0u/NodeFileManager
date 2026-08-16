@@ -57,7 +57,11 @@ class NavigationSearch:
         try: stat = path.stat(follow_symlinks=False); current = (stat.st_dev, stat.st_ino, path.is_dir())
         except OSError as error: raise FileNotFoundError("Search result is stale") from error
         if current != signature or self._linked(path): raise PermissionError("Search result is stale or unsafe")
-        parent = path if path.is_dir() else path.parent
-        folder = self.directories.select(str(parent))
-        item_id = None if path.is_dir() else self.roots.remember(path)
+        # Strict resolution revalidates every ancestor against the roots that
+        # already existed when activated; a search token can never add a root.
+        resolved = self.roots.authorize_existing_descendant(path)
+        self.roots.authorize_existing_descendant(resolved.parent)
+        folder_path = resolved if resolved.is_dir() else resolved.parent
+        folder = self.directories.metadata(folder_path)
+        item_id = None if resolved.is_dir() else self.roots.remember(resolved)
         return {"folder": folder, "fileId": item_id}

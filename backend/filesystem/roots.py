@@ -43,6 +43,18 @@ class RootRegistry:
             self._folders[identifier] = resolved
             return identifier
 
+    def authorize_existing_descendant(self, path: str | Path) -> Path:
+        """Validate and remember an existing descendant without adding a root."""
+        try:
+            resolved = Path(path).resolve(strict=True)
+        except OSError as error:
+            raise FileNotFoundError("Item no longer exists") from error
+        with self._lock:
+            if not any(resolved == root or root in resolved.parents for root in self._roots):
+                raise PermissionError("Item is outside the selected roots")
+            self._folders[folder_id(resolved)] = resolved
+        return resolved
+
     def remember_child(self, parent: Path, name: str) -> str:
         """Register an immediate lexical child without resolving it on the listing path."""
         if not name or Path(name).name != name or name in {".", ".."}:

@@ -7,20 +7,22 @@ import json
 import tempfile
 import threading
 import unittest
+import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from backend.filesystem import folder_picker
 from backend.filesystem.directory_service import DirectoryService
 from backend.filesystem.roots import RootRegistry
-from backend.server import HOST, HTTPServer, NodeFileManagerHandler
+from backend.filesystem.folder_picker import FolderPickerUnavailable
+from backend.server import HOST, NodeFileManagerHandler, ThreadingHTTPServer
 from backend.workspace.store import WorkspaceStore
 
 
 class ServerTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.server = HTTPServer((HOST, 0), NodeFileManagerHandler)
+        cls.server = ThreadingHTTPServer((HOST, 0), NodeFileManagerHandler)
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
 
@@ -87,25 +89,83 @@ class ServerTestCase(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIsNone(json.loads(body)["folder"])
 
+    def test_picker_failure_releases_lock_for_subsequent_request(self) -> None:
+        with patch.object(
+            NodeFileManagerHandler,
+            "picker",
+            staticmethod(lambda: (_ for _ in ()).throw(FolderPickerUnavailable("broken"))),
+        ):
+            status, body = self.request("POST", "/api/folders/select", origin="http://127.0.0.1:8000")
+        self.assertEqual(status, 503)
+        self.assertEqual(json.loads(body)["code"], "picker_failed")
+        with patch.object(NodeFileManagerHandler, "picker", staticmethod(lambda: None)):
+            status, _ = self.request("POST", "/api/folders/select", origin="http://127.0.0.1:8000")
+        self.assertEqual(status, 200)
+
+    def test_health_stays_responsive_and_second_picker_is_rejected(self) -> None:
+        entered = threading.Event()
+        release = threading.Event()
+
+        def pending_picker() -> None:
+            entered.set()
+            release.wait(2)
+            return None
+
+        result = []
+        with patch.object(NodeFileManagerHandler, "picker", staticmethod(pending_picker)):
+            thread = threading.Thread(target=lambda: result.append(self.request(
+                "POST", "/api/folders/select", origin="http://127.0.0.1:8000"
+            )))
+            thread.start()
+            self.assertTrue(entered.wait(1))
+            self.assertEqual(self.request("GET", "/api/health")[0], 200)
+            status, body = self.request("POST", "/api/folders/select", origin="http://127.0.0.1:8000")
+            self.assertEqual(status, 409)
+            self.assertEqual(json.loads(body)["code"], "picker_already_open")
+            release.set()
+            thread.join(2)
+        self.assertEqual(result[0][0], 200)
+
 
 class FilesystemAndWorkspaceTestCase(unittest.TestCase):
-    def test_folder_picker_hides_and_always_destroys_root_on_cancel(self) -> None:
-        root = MagicMock()
-        tkinter = MagicMock()
-        tkinter.Tk.return_value = root
-        tkinter.TclError = RuntimeError
-        filedialog = MagicMock()
-        filedialog.askdirectory.return_value = ""
-        with patch.object(
-            folder_picker.importlib,
-            "import_module",
-            side_effect=[tkinter, filedialog],
-        ):
+    def picker_result(self, stdout: str, returncode: int = 0, stderr: str = "") -> object:
+        return subprocess.CompletedProcess([], returncode, stdout, stderr)
+
+    def test_folder_picker_selected_and_cancelled_protocol(self) -> None:
+        with patch.object(folder_picker.subprocess, "run", return_value=self.picker_result(
+            '{"status":"selected","path":"/example"}'
+        )) as run:
+            self.assertEqual(folder_picker.select_folder(), "/example")
+            self.assertEqual(run.call_args.args[0][0], folder_picker.sys.executable)
+            self.assertNotIn("shell", run.call_args.kwargs)
+        with patch.object(folder_picker.subprocess, "run", return_value=self.picker_result(
+            '{"status":"cancelled"}'
+        )):
             self.assertIsNone(folder_picker.select_folder())
-        root.withdraw.assert_called_once_with()
-        root.attributes.assert_called_once_with("-topmost", True)
-        filedialog.askdirectory.assert_called_once_with(parent=root, mustexist=True)
-        root.destroy.assert_called_once_with()
+
+    def test_folder_picker_reports_child_error_crash_and_malformed_output(self) -> None:
+        cases = [
+            self.picker_result('{"status":"error","reason":"Tcl failed"}'),
+            self.picker_result("", returncode=1, stderr="crash"),
+            self.picker_result("not-json"),
+            self.picker_result('{"status":"selected"}'),
+        ]
+        for completed in cases:
+            with self.subTest(completed=completed), patch.object(
+                folder_picker.subprocess, "run", return_value=completed
+            ):
+                with self.assertRaises(FolderPickerUnavailable):
+                    folder_picker.select_folder()
+
+    def test_folder_picker_timeout_is_clean_error(self) -> None:
+        with patch.object(
+            folder_picker.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(["python"], 600),
+        ) as run:
+            with self.assertRaisesRegex(FolderPickerUnavailable, "タイムアウト"):
+                folder_picker.select_folder()
+        self.assertEqual(run.call_args.kwargs["timeout"], folder_picker.PICKER_TIMEOUT_SECONDS)
 
     def test_listing_and_authorization_boundary(self) -> None:
         with tempfile.TemporaryDirectory() as selected, tempfile.TemporaryDirectory() as outside:

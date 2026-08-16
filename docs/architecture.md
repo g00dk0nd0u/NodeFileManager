@@ -4,7 +4,11 @@
 
 ブラウザー UI → localhost JSON API → Python ファイルシステム権限、という一方向の境界です。フロントエンドは DOM フォルダーノード、SVG エッジ、選択・ドラッグ・パン・ズームを担当します。座標変換は `viewport.js`、初回の子配置は `layout.js` に分離しています。
 
-Python は `tkinter.filedialog.askdirectory` を抽象化した picker からのみルートを追加します。`RootRegistry` はセッション中の選択済みルートと発見済み ID を保持し、children API は ID だけを受け取ります。ブラウザー指定の任意パスを読む API はありません。復元時だけ、以前保存したルートが現在も実在することを検証して再認可します。
+Python は `tkinter.filedialog.askdirectory` を抽象化した picker からのみルートを追加します。picker は固定された `sys.executable -m backend.filesystem.folder_picker_child` を起動し、専用の短命プロセス内で Tk の生成から破棄までを完結させます。子は選択、キャンセル、エラーを JSON で返し、サーバーは終了コードと JSON を検証します。クラッシュ、不正応答、10 分のタイムアウトは API エラーとなり、タイムアウト時には標準ライブラリが子を kill して wait するため、長時間稼働するサーバーに Tk のモーダル状態が残りません。
+
+HTTP サーバーは `ThreadingHTTPServer` です。picker を待つリクエストとは別に health や workspace を処理できます。一方、非ブロッキング lock により picker は全体で一つだけとし、二つ目には `409 picker_already_open` を返します。lock は成功、キャンセル、例外、クラッシュ、タイムアウトのすべてで `finally` により解放します。
+
+`RootRegistry` はセッション中の選択済みルートと発見済み ID を保持し、children API は ID だけを受け取ります。ブラウザー指定の任意パスを読む API はありません。復元時だけ、以前保存したルートが現在も実在することを検証して再認可します。
 
 ## API
 

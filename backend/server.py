@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+import threading
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -27,6 +28,7 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
     directories = DirectoryService(roots)
     workspace = WorkspaceStore()
     picker = staticmethod(folder_picker.select_folder)
+    picker_lock = threading.Lock()
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, directory=str(FRONTEND_DIRECTORY), **kwargs)
@@ -103,13 +105,23 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
         if urlsplit(self.path).path != "/api/folders/select":
             self.send_error(404, "API endpoint not found")
             return
+        if not self.picker_lock.acquire(blocking=False):
+            self._json(409, {
+                "error": "フォルダー選択ダイアログは既に開いています。",
+                "code": "picker_already_open",
+            })
+            return
         try:
-            selected = self.picker()
-            self._json(200, {"folder": self.directories.select(selected) if selected else None})
-        except FolderPickerUnavailable as error:
-            self._json(503, {"error": str(error)})
-        except OSError as error:
-            self._json(400, {"error": f"選択したフォルダーを利用できません: {error}"})
+            try:
+                selected = self.picker()
+                folder = self.directories.select(selected) if selected else None
+                self._json(200, {"folder": folder})
+            except FolderPickerUnavailable as error:
+                self._json(503, {"error": str(error), "code": "picker_failed"})
+            except OSError as error:
+                self._json(400, {"error": f"選択したフォルダーを利用できません: {error}"})
+        finally:
+            self.picker_lock.release()
 
     def do_PUT(self) -> None:  # noqa: N802
         if not self._validate_request(require_origin=True):
@@ -133,10 +145,8 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
 
 
 def main() -> None:
-    # HTTPServer handles requests on this main thread. This is intentional:
-    # tkinter requires its native dialog and event loop to run on the thread
-    # that created the application (the Python main thread here).
-    server = HTTPServer((HOST, PORT), NodeFileManagerHandler)
+    # The picker waits in one request thread; Tk itself lives in its child.
+    server = ThreadingHTTPServer((HOST, PORT), NodeFileManagerHandler)
     print(f"NodeFileManager: http://{HOST}:{PORT}/")
     try:
         server.serve_forever()

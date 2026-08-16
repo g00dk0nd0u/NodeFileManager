@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -126,6 +127,24 @@ class ServerTestCase(unittest.TestCase):
             thread.join(2)
         self.assertEqual(result[0][0], 200)
 
+    def test_preview_allows_only_authorized_whitelisted_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "image.png").write_bytes(b"png-data")
+            Path(directory, "notes.txt").write_text("private")
+            with patch.object(NodeFileManagerHandler, "picker", staticmethod(lambda: directory)):
+                _, body = self.request("POST", "/api/folders/select", origin="http://127.0.0.1:8000", body={})
+            root_id = json.loads(body)["folder"]["id"]
+            _, body = self.request("GET", f"/api/folders/children?id={root_id}")
+            files = {item["name"]: item for item in json.loads(body)["files"]}
+            status, body = self.request("GET", f"/api/files/preview?id={files['image.png']['id']}")
+            self.assertEqual((status, body), (200, b"png-data"))
+            connection = http.client.HTTPConnection(HOST, self.server.server_port)
+            connection.request("GET", f"/api/files/preview?id={files['image.png']['id']}", headers={"Host": "127.0.0.1:8000"})
+            response = connection.getresponse(); self.assertEqual(response.getheader("Content-Type"), "image/png")
+            self.assertEqual(response.getheader("Content-Disposition"), "inline"); response.read(); connection.close()
+            self.assertEqual(self.request("GET", f"/api/files/preview?id={files['notes.txt']['id']}")[0], 403)
+            self.assertEqual(self.request("GET", "/api/files/preview?id=unknown")[0], 403)
+
 
 class FilesystemAndWorkspaceTestCase(unittest.TestCase):
     def picker_result(self, stdout: str, returncode: int = 0, stderr: str = "") -> object:
@@ -181,6 +200,33 @@ class FilesystemAndWorkspaceTestCase(unittest.TestCase):
                 roots.remember(Path(outside))
             with self.assertRaises(PermissionError):
                 service.children("unknown-id")
+
+    def test_listing_is_one_lazy_scandir_and_one_parent_resolve(self) -> None:
+        with tempfile.TemporaryDirectory() as selected:
+            child = Path(selected, "Child"); child.mkdir()
+            Path(child, "deep").mkdir(); Path(selected, "ordinary.txt").write_text("file")
+            roots = RootRegistry(); service = DirectoryService(roots); root = service.select(selected)
+            original_resolve = Path.resolve
+            with patch("backend.filesystem.directory_service.os.scandir", wraps=os.scandir) as scandir, patch.object(
+                Path, "resolve", autospec=True,
+                side_effect=lambda path, strict=False: original_resolve(path, strict=strict),
+            ) as resolve:
+                contents = service.contents(str(root["id"]))
+            self.assertEqual(scandir.call_count, 1)
+            self.assertEqual(resolve.call_count, 1)
+            self.assertEqual(contents["folders"][0]["childrenState"], "unknown")
+
+    def test_listed_symlink_is_registered_lexically_but_checked_before_use(self) -> None:
+        with tempfile.TemporaryDirectory() as selected, tempfile.TemporaryDirectory() as outside:
+            link = Path(selected, "outside-link")
+            try:
+                link.symlink_to(Path(outside), target_is_directory=True)
+            except (NotImplementedError, OSError) as error:
+                self.skipTest(f"symlinks unavailable: {error}")
+            roots = RootRegistry(); service = DirectoryService(roots); root = service.select(selected)
+            contents = service.contents(str(root["id"])); item = (contents["folders"] + contents["files"])[0]
+            with self.assertRaises(PermissionError):
+                roots.path_for(str(item["id"]))
 
     def test_workspace_round_trip_and_missing_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

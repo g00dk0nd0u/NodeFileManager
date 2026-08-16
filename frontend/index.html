@@ -12,6 +12,8 @@
       <header class="toolbar">
         <h1>NodeFileManager</h1>
         <button id="select-folder" type="button">＋ Select Folder</button>
+        <button id="refresh" type="button">↻ Refresh</button>
+        <button id="rename" type="button">Rename</button>
         <span id="status" role="status">起動しています…</span>
       </header>
       <section id="canvas" tabindex="0">
@@ -19,6 +21,24 @@
         <div id="world"></div>
         <p id="empty-hint">Select Folder からフォルダーを追加してください<br><small>ドラッグ: ノード移動　背景ドラッグ: パン　ホイール: ズーム</small></p>
       </section>
+      <dialog id="folder-browser-dialog">
+        <form method="dialog" id="folder-browser-form">
+          <strong>Select Folder</strong>
+          <div class="folder-browser-locations"></div>
+          <div class="folder-browser-path"></div>
+          <div class="folder-browser-folders"></div>
+          <div class="dialog-actions">
+            <button value="cancel">Cancel</button>
+            <button id="folder-browser-confirm" value="confirm">Select This Folder</button>
+          </div>
+        </form>
+      </dialog>
+      <dialog id="new-folder-dialog">
+        <form method="dialog">
+          <label>New Folder <input id="new-folder-name" autocomplete="off" required></label>
+          <div class="dialog-actions"><button value="cancel">Cancel</button><button id="new-folder-confirm" value="confirm">Create</button></div>
+        </form>
+      </dialog>
     </main>
     <script type="module" src="/js/app.js"></script>
   </body>

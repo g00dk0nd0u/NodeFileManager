@@ -11,6 +11,9 @@ from urllib.parse import parse_qs, urlsplit
 from backend.filesystem import folder_picker
 from backend.filesystem.directory_service import DirectoryService
 from backend.filesystem.folder_picker import FolderPickerUnavailable
+from backend.filesystem.folder_browser import FolderBrowser
+from backend.filesystem.opener import FileOpener
+from backend.filesystem.operations import FileOperationError, FileOperations
 from backend.filesystem.roots import RootRegistry
 from backend.workspace.store import WorkspaceStore
 
@@ -26,6 +29,9 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
 
     roots = RootRegistry()
     directories = DirectoryService(roots)
+    operations = FileOperations(roots, directories)
+    folder_browser = FolderBrowser(directories)
+    opener = FileOpener(roots)
     workspace = WorkspaceStore()
     picker = staticmethod(folder_picker.select_folder)
     picker_lock = threading.Lock()
@@ -66,8 +72,24 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
         elif request.path == "/api/folders/children":
             identifier = parse_qs(request.query).get("id", [""])[0]
             try:
-                self._json(200, {"folders": self.directories.children(identifier)})
-            except PermissionError as error:
+                self._json(200, self.directories.contents(identifier))
+            except (PermissionError, FileNotFoundError, NotADirectoryError) as error:
+                self._json(403, {"error": str(error)})
+        elif request.path == "/api/files/preview":
+            identifier = parse_qs(request.query).get("id", [""])[0]
+            try:
+                target = self.roots.path_for(identifier)
+                allowed = {".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
+                content_type = allowed.get(target.suffix.casefold())
+                if not target.is_file() or content_type is None:
+                    raise PermissionError("File type is not available for preview")
+                with target.open("rb") as source:
+                    size = target.stat().st_size
+                    self.send_response(200); self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Disposition", "inline"); self.send_header("Content-Length", str(size))
+                    self.send_header("Cache-Control", "private, no-cache"); self.end_headers()
+                    self.copyfile(source, self.wfile)
+            except (OSError, PermissionError) as error:
                 self._json(403, {"error": str(error)})
         elif request.path == "/api/workspace":
             state = self.workspace.load()
@@ -102,7 +124,41 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         if not self._validate_request(require_origin=True):
             return
-        if urlsplit(self.path).path != "/api/folders/select":
+        path = urlsplit(self.path).path
+        if path.startswith("/api/folder-browser/"):
+            try:
+                body = self._read_json()
+                if path.endswith("/start"):
+                    result = self.folder_browser.start()
+                elif path.endswith("/navigate"):
+                    result = self.folder_browser.navigate(body.get("sessionId"), body.get("folderId"))
+                elif path.endswith("/confirm"):
+                    result = {"folder": self.folder_browser.confirm(body.get("sessionId"))}
+                elif path.endswith("/cancel"):
+                    self.folder_browser.cancel(body.get("sessionId")); result = {"cancelled": True}
+                else:
+                    self.send_error(404, "API endpoint not found"); return
+                self._json(200, result)
+            except (ValueError, OSError, PermissionError) as error:
+                self._operation_error(error)
+            return
+        if path in {"/api/files/open", "/api/items/copy", "/api/items/move", "/api/folders/create"}:
+            try:
+                body = self._read_json()
+                identifier = str(body.get("id", ""))
+                if path == "/api/files/open":
+                    self.opener.open(identifier)
+                    self._json(200, {"opened": True})
+                elif path == "/api/folders/create":
+                    self._json(200, {"folder": self.operations.create_folder(str(body.get("parentId", "")), body.get("name"))})
+                else:
+                    destination_id = str(body.get("destinationId", ""))
+                    operation = self.operations.copy if path.endswith("copy") else self.operations.move
+                    self._json(200, {"item": operation(identifier, destination_id)})
+            except (ValueError, OSError, PermissionError) as error:
+                self._operation_error(error)
+            return
+        if path != "/api/folders/select":
             self.send_error(404, "API endpoint not found")
             return
         if not self.picker_lock.acquire(blocking=False):
@@ -136,8 +192,31 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
         except (ValueError, json.JSONDecodeError, OSError) as error:
             self._json(400, {"error": str(error)})
 
-    do_PATCH = lambda self: self._reject_state_change()  # noqa: E731
+    def do_PATCH(self) -> None:  # noqa: N802
+        if not self._validate_request(require_origin=True):
+            return
+        if urlsplit(self.path).path != "/api/items/rename":
+            self.send_error(404, "API endpoint not found")
+            return
+        try:
+            body = self._read_json()
+            item = self.operations.rename(str(body.get("id", "")), body.get("name"))
+            self._json(200, {"item": item})
+        except (ValueError, OSError, PermissionError) as error:
+            self._operation_error(error)
+
     do_DELETE = lambda self: self._reject_state_change()  # noqa: E731
+
+    def _operation_error(self, error: Exception) -> None:
+        if isinstance(error, PermissionError):
+            status = 403
+        elif isinstance(error, FileNotFoundError):
+            status = 404
+        elif isinstance(error, FileExistsError):
+            status = 409
+        else:
+            status = 400
+        self._json(status, {"error": str(error)})
 
     def _reject_state_change(self) -> None:
         if self._validate_request(require_origin=True):

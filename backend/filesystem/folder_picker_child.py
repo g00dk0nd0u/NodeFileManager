@@ -14,11 +14,22 @@ def pick() -> dict[str, str]:
     root = tkinter.Tk()
     try:
         root.withdraw()
-        selected = filedialog.askdirectory(mustexist=True)
+        try:
+            root.attributes("-topmost", True)
+            root.lift()
+            root.update_idletasks()
+            root.update()
+        except tkinter.TclError:
+            pass
+        selected = filedialog.askdirectory(parent=root, mustexist=True)
         if selected:
             return {"status": "selected", "path": selected}
         return {"status": "cancelled"}
     finally:
+        try:
+            root.attributes("-topmost", False)
+        except tkinter.TclError:
+            pass
         root.destroy()
 
 

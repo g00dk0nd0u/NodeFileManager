@@ -4,22 +4,23 @@ from __future__ import annotations
 
 import http.client
 import json
+import tempfile
 import threading
 import unittest
-import tempfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from backend.server import HOST, NodeFileManagerHandler, ThreadingHTTPServer
+from backend.filesystem import folder_picker
 from backend.filesystem.directory_service import DirectoryService
 from backend.filesystem.roots import RootRegistry
+from backend.server import HOST, HTTPServer, NodeFileManagerHandler
 from backend.workspace.store import WorkspaceStore
 
 
 class ServerTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.server = ThreadingHTTPServer((HOST, 0), NodeFileManagerHandler)
+        cls.server = HTTPServer((HOST, 0), NodeFileManagerHandler)
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
 
@@ -88,6 +89,24 @@ class ServerTestCase(unittest.TestCase):
 
 
 class FilesystemAndWorkspaceTestCase(unittest.TestCase):
+    def test_folder_picker_hides_and_always_destroys_root_on_cancel(self) -> None:
+        root = MagicMock()
+        tkinter = MagicMock()
+        tkinter.Tk.return_value = root
+        tkinter.TclError = RuntimeError
+        filedialog = MagicMock()
+        filedialog.askdirectory.return_value = ""
+        with patch.object(
+            folder_picker.importlib,
+            "import_module",
+            side_effect=[tkinter, filedialog],
+        ):
+            self.assertIsNone(folder_picker.select_folder())
+        root.withdraw.assert_called_once_with()
+        root.attributes.assert_called_once_with("-topmost", True)
+        filedialog.askdirectory.assert_called_once_with(parent=root, mustexist=True)
+        root.destroy.assert_called_once_with()
+
     def test_listing_and_authorization_boundary(self) -> None:
         with tempfile.TemporaryDirectory() as selected, tempfile.TemporaryDirectory() as outside:
             child = Path(selected, "Child")

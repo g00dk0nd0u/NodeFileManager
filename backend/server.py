@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -133,7 +133,10 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
 
 
 def main() -> None:
-    server = ThreadingHTTPServer((HOST, PORT), NodeFileManagerHandler)
+    # HTTPServer handles requests on this main thread. This is intentional:
+    # tkinter requires its native dialog and event loop to run on the thread
+    # that created the application (the Python main thread here).
+    server = HTTPServer((HOST, PORT), NodeFileManagerHandler)
     print(f"NodeFileManager: http://{HOST}:{PORT}/")
     try:
         server.serve_forever()

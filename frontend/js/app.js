@@ -1,4 +1,4 @@
-import { activateSearch, cancelFolderBrowser, confirmFolderBrowser, copyItem, createFolder, getChildren, getHealth, getNavigation, moveItem, navigateFolderBrowser, openFile, openNavigation, quitApplication, removeFavorite, renameItem, searchNames, startFolderBrowser, toggleFavorite, visitFolder } from "./api/client.js";
+import { activateSearch, cancelFolderBrowser, confirmFolderBrowser, copyItem, createFolder, getChildren, getHealth, getNavigation, getParent, moveItem, navigateFolderBrowser, openFile, openNavigation, quitApplication, removeFavorite, renameItem, searchFolder, searchNames, startFolderBrowser, toggleFavorite, visitFolder } from "./api/client.js";
 import { FolderCanvas } from "./canvas/canvas.js";
 import { createWorkspaceSaver, restoreWorkspace } from "./workspace/workspace.js";
 import { createIcon } from "./icons.js";
@@ -22,6 +22,7 @@ function renderNavigation(state) {
 }
 async function navigateEntry(id) { try { const result = await openNavigation(id); renderNavigation(result); if (!canvas.revealNode(result.folder.id)) await canvas.addRoot(result.folder); status.textContent = `移動: ${result.folder.path}`; } catch (error) { showError(error); renderNavigation(await getNavigation()); } }
 canvas.actions.favorite = async (id) => { try { renderNavigation(await toggleFavorite(id)); } catch (error) { showError(error); } };
+canvas.actions.getParent = getParent;
 canvas.actions.visit = async (id) => { try { renderNavigation(await visitFolder(id)); } catch (error) { showError(error); } };
 
 async function refresh() { try { await canvas.refresh(); status.textContent = "ファイルシステムから更新しました"; } catch (error) { showError(error); } }
@@ -64,15 +65,14 @@ try {
   status.textContent = await restoreWorkspace(canvas); renderNavigation(await getNavigation());
 } catch (error) { showError(error); }
 
-const selectFolderButton = document.querySelector("#select-folder");
-selectFolderButton.addEventListener("click", async () => {
+async function selectFolder() {
   const generation = ++browserGeneration; browserDialog.returnValue = "cancel"; browserDialog.showModal(); status.textContent = "フォルダーを読み込んでいます…";
   try {
     const view = await startFolderBrowser();
     if (!browserDialog.open || generation !== browserGeneration) { cancelFolderBrowser(view.sessionId).catch(showError); return; }
     showBrowser(view); status.textContent = "フォルダーを選択してください";
   } catch (error) { if (browserDialog.open) browserDialog.close("cancel"); showError(error); }
-});
+}
 document.querySelector("#folder-browser-confirm").addEventListener("click", async (event) => {
   event.preventDefault(); if (!browserSession) return;
   try { const session = browserSession; browserSession = null; const result = await confirmFolderBrowser(session); browserDialog.close("confirm"); await canvas.addRoot(result.folder); renderNavigation(result); status.textContent = `追加: ${result.folder.path}`; } catch (error) { showError(error); }
@@ -85,7 +85,15 @@ function refreshAfterFocus() { clearTimeout(focusRefreshTimer); focusRefreshTime
 window.addEventListener("focus", refreshAfterFocus);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshAfterFocus(); });
 
-const searchInput = document.querySelector("#quick-search"), searchResults = document.querySelector("#search-results"); let searchTimer, searchGeneration = 0;
-function closeSearch() { searchGeneration += 1; clearTimeout(searchTimer); searchInput.value = ""; searchResults.hidden = true; searchResults.replaceChildren(); canvas.canvas.focus(); }
-searchInput.addEventListener("input", () => { clearTimeout(searchTimer); const query = searchInput.value.trim(), generation = ++searchGeneration; if (query.length < 2) { searchResults.hidden = true; return; } searchTimer = setTimeout(async () => { try { const response = await searchNames(query); if (generation !== searchGeneration) return; const rows = response.results.map((item) => { const button = document.createElement("button"); button.type = "button"; button.className = "search-result"; button.innerHTML = `<span class="search-result-icon"></span><strong></strong><span class="search-context"></span>`; button.querySelector(".search-result-icon").append(createIcon(item.kind === "folder" ? "folder" : "file")); button.querySelector("strong").textContent = item.name; button.querySelector(".search-context").textContent = item.context; button.addEventListener("click", async () => { try { const result = await activateSearch(item.id); renderNavigation(result); if (!canvas.revealNode(result.folder.id)) await canvas.addRoot(result.folder); if (result.fileId) { const node = canvas.nodes.get(result.folder.id), file = node?.files?.find((entry) => entry.id === result.fileId), row = canvas.elements.get(result.folder.id)?.querySelector(`[data-id="${CSS.escape(result.fileId)}"]`); if (file && row) { canvas.selectFile(file, row); canvas.preview(result.folder.id, file); } } searchResults.hidden = true; } catch (error) { showError(error); } }); return button; }); searchResults.replaceChildren(...rows); searchResults.hidden = false; status.textContent = `${response.results.length} 件${response.truncated ? "（上限到達）" : ""}`; } catch (error) { showError(error); } }, 250); });
-document.addEventListener("keydown", (event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); searchInput.focus(); searchInput.select(); } else if (event.key === "Escape" && (document.activeElement === searchInput || !searchResults.hidden)) { event.stopImmediatePropagation(); closeSearch(); } }, true);
+let temporarySearch;
+function showResults(panel, results, query) {
+  temporarySearch?.remove(); const card=document.createElement("section"); card.className="temporary-search";
+  card.style.transform=`translate(${panel.x}px,${panel.y-170}px)`; const title=document.createElement("strong"); title.textContent=`Search: ${query}`; card.append(title);
+  for(const item of results){const button=document.createElement("button");button.textContent=item.name;button.onclick=()=>{const owner=[...canvas.nodes.values()].find(n=>(n.files||[]).some(x=>x.id===item.id)||(n.folders||[]).some(x=>x.id===item.id));if(owner)canvas.revealPanel(owner.panelInstanceId,item.id);else canvas.revealPanel(panel.panelInstanceId);card.remove();};card.append(button);} canvas.world.append(card);temporarySearch=card;
+}
+canvas.actions.localSearch = (panelId) => { const panel=canvas.nodes.get(panelId), input=document.createElement("input"); input.className="header-search";input.type="search";input.placeholder="Search recursively…";canvas.elements.get(panelId).querySelector(".node-title").append(input);input.focus();let timer;
+  input.oninput=()=>{clearTimeout(timer);const q=input.value.trim();if(q.length<2)return;timer=setTimeout(async()=>{try{const response=await searchFolder(panel.folderId,q);showResults(panel,response.results,q);}catch(error){showError(error);}},300);};input.onkeydown=e=>{if(e.key==="Escape"){temporarySearch?.remove();input.remove();canvas.canvas.focus();}};input.onblur=()=>{if(!input.value)input.remove();}; };
+function workspaceSearch(){const query=prompt("Search visible workspace");if(!query)return;const term=query.toLocaleLowerCase(), matches=[];for(const panel of canvas.nodes.values())for(const item of [...(panel.folders||[]),...(panel.files||[])])if(item.name.toLocaleLowerCase().includes(term))matches.push(item);const anchor=[...canvas.nodes.values()][0];if(anchor)showResults(anchor,matches,query);status.textContent=`${matches.length} visible matches`;}
+const menu=document.querySelector("#canvas-menu");canvas.actions.canvasMenu=(x,y)=>{menu.style.left=`${x}px`;menu.style.top=`${y}px`;menu.hidden=false;};
+menu.addEventListener("click",e=>{const action=e.target.dataset.action;menu.hidden=true;if(action==="select")selectFolder();if(action==="search")workspaceSearch();});document.addEventListener("pointerdown",e=>{if(!e.target.closest("#canvas-menu"))menu.hidden=true;});
+document.addEventListener("keydown",event=>{if(event.key==="Escape"){temporarySearch?.remove();menu.hidden=true;}if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="k"){event.preventDefault();workspaceSearch();}},true);

@@ -59,3 +59,29 @@ class DirectoryService:
 
     def children(self, parent_id: str) -> list[dict[str, object]]:
         return self.contents(parent_id)["folders"]
+
+    def parent(self, folder_id: str) -> dict[str, object] | None:
+        folder = self.roots.get(folder_id)
+        parent = folder.parent
+        if parent == folder:
+            return None
+        # The requested folder was already server-authorized. Resolve and register
+        # exactly one real parent; never accept a client-provided path here.
+        return self.metadata(self.roots.authorize_root(str(parent)))
+
+    def search(self, folder_id: str, query: str, limit: int = 100) -> dict[str, object]:
+        term = query.strip().casefold()
+        if len(term) < 2:
+            raise ValueError("Search requires at least two characters")
+        root = self.roots.get(folder_id)
+        results: list[dict[str, object]] = []
+        for current, directories, files in os.walk(root, followlinks=False):
+            directories[:] = [name for name in directories if not (Path(current) / name).is_symlink()]
+            for name, kind in [(name, "folder") for name in directories] + [(name, "file") for name in files]:
+                if term not in name.casefold():
+                    continue
+                path = Path(current) / name
+                results.append(self.metadata(path))
+                if len(results) >= limit:
+                    return {"results": results, "truncated": True}
+        return {"results": results, "truncated": False}

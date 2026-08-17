@@ -11,6 +11,8 @@ export const navigateFolderBrowser = (sessionId, folderId) => request("/api/fold
 export const confirmFolderBrowser = (sessionId) => request("/api/folder-browser/confirm", { method: "POST", body: JSON.stringify({ sessionId }) });
 export const cancelFolderBrowser = (sessionId) => request("/api/folder-browser/cancel", { method: "POST", body: JSON.stringify({ sessionId }) });
 export const getChildren = (id) => request(`/api/folders/children?id=${encodeURIComponent(id)}`);
+export const getParent = (id) => request(`/api/folders/parent?id=${encodeURIComponent(id)}`);
+export const searchFolder = (id, query) => request(`/api/folders/search?id=${encodeURIComponent(id)}&q=${encodeURIComponent(query)}`);
 export const openFile = (id) => request("/api/files/open", { method: "POST", body: JSON.stringify({ id }) });
 export const renameItem = (id, name) => request("/api/items/rename", { method: "PATCH", body: JSON.stringify({ id, name }) });
 export const copyItem = (id, destinationId) => request("/api/items/copy", { method: "POST", body: JSON.stringify({ id, destinationId }) });

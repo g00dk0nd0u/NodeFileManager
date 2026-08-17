@@ -8,6 +8,7 @@ const paths = {
   previous: '<path d="m12.5 5-5 5 5 5"/>',
   next: '<path d="m7.5 5 5 5-5 5"/>',
   up: '<path d="m5 12.5 5-5 5 5"/>',
+  search: '<circle cx="8.5" cy="8.5" r="4.5"/><path d="m12 12 4 4"/>',
 };
 
 export function createIcon(name) {

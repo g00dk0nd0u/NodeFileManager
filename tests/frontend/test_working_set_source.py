@@ -39,6 +39,20 @@ class WorkingSetSourceInvariantTest(unittest.TestCase):
         self.assertIn("workingSetId", serialization)
         self.assertNotIn("fsParentFolderId,...saved", serialization)
 
+    def test_moved_visible_branch_reconciles_path_derived_identities(self):
+        app = (ROOT / "frontend/js/app.js").read_text(encoding="utf-8")
+        self.assertIn("reconcileMovedFolder(id,result.item)", app)
+        self.assertIn("async reconcileMovedFolder(oldFolderId,movedItem)", self.canvas)
+        self.assertIn("folderId:movedItem.id", self.canvas)
+        self.assertIn("await this.reconcileVisibleDescendants(root)", self.canvas)
+        self.assertIn("folderId:current.id", self.canvas)
+
+    def test_normal_parent_connection_clears_compact_parent(self):
+        open_parent = self.canvas[self.canvas.index("async openParent"):self.canvas.index("\n  revealPanel")]
+        reattach = self.canvas[self.canvas.index("\n  reattach(panelId"):self.canvas.index("\n  cleanupSets()")]
+        self.assertIn("delete child.compactParent", open_parent)
+        self.assertIn("delete root.compactParent", reattach)
+
 
 if __name__ == "__main__":
     unittest.main()

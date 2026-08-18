@@ -27,7 +27,7 @@ class WorkingSetSourceInvariantTest(unittest.TestCase):
 
     def test_second_sibling_reflows_entire_local_family(self):
         self.assertIn("if(children.length===1)", self.canvas)
-        self.assertIn("children.forEach((child,index)=>this.moveBranchTo", self.canvas)
+        self.assertIn("children.forEach((child,index)=>{this.moveBranchTo", self.canvas)
 
     def test_panel_header_does_not_mix_native_and_pointer_drag(self):
         self.assertNotIn('class="node-title" draggable="true"', self.node)
@@ -59,6 +59,40 @@ class WorkingSetSourceInvariantTest(unittest.TestCase):
         self.assertIn("this.removeBranch(child.panelInstanceId)", refresh)
         self.assertLess(refresh.index("this.removeBranch(child.panelInstanceId)"), refresh.index("await this.refreshBranch(child)"))
         self.assertIn("if(node.visualParentPanelId){this.removeBranch", refresh)
+
+    def test_panel_width_model_and_measured_bounds_are_centralized(self):
+        layout = (ROOT / "frontend/js/canvas/layout.js").read_text(encoding="utf-8")
+        self.assertIn("PANEL_WIDTH = Object.freeze({ single: 330, mixed: 430 })", layout)
+        self.assertIn("node.renderedWidth=element.offsetWidth", self.canvas)
+        self.assertIn("n.x + n.renderedWidth", self.canvas)
+        self.assertLess(self.canvas.index("node.renderedWidth=element.offsetWidth"), self.canvas.index("this.renderSets();this.renderEdges()"))
+
+    def test_panel_drag_only_moves_a_whole_working_set(self):
+        drag = self.canvas[self.canvas.index("\n  continueDrag(event)"):self.canvas.index("\n  endDrag(event)")]
+        self.assertIn('if(s.type==="set")for', drag)
+        self.assertNotIn('if(s.type==="panel")for', drag)
+
+    def test_connector_uses_row_header_and_viewport_conversion(self):
+        edges = self.canvas[self.canvas.index("renderEdges()") : self.canvas.index("\n\n  isolate(")]
+        self.assertIn('folder-item[data-id="${CSS.escape(child.folderId)}"]', edges)
+        self.assertIn('querySelector(".node-title")', edges)
+        self.assertIn("getBoundingClientRect()", edges)
+        self.assertIn("this.screenToWorld", edges)
+        self.assertIn("canvasRect.left", edges)
+        self.assertIn(" L ${exit.x}", edges)
+        self.assertIn(" C ${right?", edges)
+
+    def test_working_set_has_no_continuous_bounds_transition(self):
+        css = (ROOT / "frontend/css/canvas.css").read_text(encoding="utf-8")
+        working_set = css[css.index(".working-set{"):css.index(".folder-node{")]
+        self.assertNotIn("transition:", working_set)
+
+    def test_local_search_is_a_world_overlay_not_a_title_child(self):
+        app = (ROOT / "frontend/js/app.js").read_text(encoding="utf-8")
+        local = app[app.index("canvas.actions.localSearch"):app.index("function workspaceSearch")]
+        self.assertIn('stack.className="local-search-stack"', local)
+        self.assertIn("canvas.world.append(stack)", local)
+        self.assertNotIn('querySelector(".node-title").append', local)
 
     def test_folder_rename_reconciles_visible_descendant_identities(self):
         rename = self.canvas[self.canvas.index("async applyRename"):self.canvas.index("async reconcileVisibleDescendants")]

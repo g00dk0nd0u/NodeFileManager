@@ -110,6 +110,20 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
                 self._json(200, self.directories.contents(identifier))
             except (PermissionError, FileNotFoundError, NotADirectoryError) as error:
                 self._json(403, {"error": str(error)})
+        elif request.path == "/api/folders/parent":
+            identifier = parse_qs(request.query).get("id", [""])[0]
+            try:
+                self._json(200, {"parent": self.directories.parent(identifier)})
+            except (PermissionError, FileNotFoundError, NotADirectoryError) as error:
+                self._json(403, {"error": str(error)})
+        elif request.path == "/api/folders/search":
+            query = parse_qs(request.query)
+            try:
+                self._json(200, self.directories.search(query.get("id", [""])[0], query.get("q", [""])[0]))
+            except ValueError as error:
+                self._json(400, {"error": str(error)})
+            except (PermissionError, FileNotFoundError, NotADirectoryError) as error:
+                self._json(403, {"error": str(error)})
         elif request.path == "/api/files/preview":
             identifier = parse_qs(request.query).get("id", [""])[0]
             try:
@@ -133,7 +147,7 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
             available = []
             for root in state.get("roots", []):
                 try:
-                    available.append(self.directories.select(str(root["path"])))
+                    available.append({**root, **self.directories.select(str(root["path"]))})
                 except (OSError, KeyError, TypeError):
                     continue
             for node in state.get("nodes", {}).values():

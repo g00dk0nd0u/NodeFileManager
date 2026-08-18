@@ -11,7 +11,6 @@
     <main id="workspace" aria-label="フォルダーワークスペース">
       <header class="toolbar">
         <h1>NodeFileManager</h1>
-        <button id="select-folder" type="button"><svg class="icon" viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M10 4v12M4 10h12"/></svg>Select Folder</button>
         <button id="refresh" type="button"><svg class="icon" viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M16 7V3l-1.8 1.8A7 7 0 1 0 17 10"/></svg>Refresh</button>
         <button id="rename" type="button">Rename</button>
         <button id="quit" type="button" hidden>Quit</button>
@@ -19,15 +18,15 @@
         <span id="status" role="status">起動しています…</span>
       </header>
       <nav class="quick-access" aria-label="クイックアクセス">
-        <div class="quick-search"><label for="quick-search">Search:</label><input id="quick-search" type="search" autocomplete="off" placeholder="名前を検索 (Ctrl/Cmd+K)"><div id="search-results" hidden></div></div>
-        <div class="quick-row"><strong>Favorites:</strong><div id="favorites" class="quick-chips"></div></div>
         <div class="quick-row"><strong>HOT:</strong><div id="hot" class="quick-chips"></div></div>
       </nav>
       <section id="canvas" tabindex="0">
         <svg id="edges" aria-hidden="true"><g></g></svg>
         <div id="world"></div>
-        <p id="empty-hint">Select Folder からフォルダーを追加してください<br><small>ドラッグ: ノード移動　背景ドラッグ: パン　ホイール: ズーム</small></p>
+        <p id="empty-hint">空のキャンバスを右クリックしてフォルダーを追加<br><small>背景ドラッグ: パン　ホイール: ズーム</small></p>
       </section>
+      <div id="canvas-menu" class="context-menu" hidden><button data-action="select">Select Folder</button><button data-action="search">Search Workspace</button></div>
+      <div id="panel-menu" class="context-menu" hidden><button data-action="isolate">Isolate</button><button data-action="rename">Rename</button><button data-action="new">New Folder</button></div>
       <dialog id="folder-browser-dialog">
         <form method="dialog" id="folder-browser-form">
           <strong>Select Folder</strong>
@@ -44,6 +43,12 @@
         <form method="dialog">
           <label>New Folder <input id="new-folder-name" autocomplete="off" required></label>
           <div class="dialog-actions"><button value="cancel">Cancel</button><button id="new-folder-confirm" value="confirm">Create</button></div>
+        </form>
+      </dialog>
+      <dialog id="rename-dialog">
+        <form method="dialog">
+          <label>Rename <input id="rename-name" autocomplete="off" required></label>
+          <div class="dialog-actions"><button value="cancel">Cancel</button><button id="rename-confirm" value="confirm">Rename</button></div>
         </form>
       </dialog>
     </main>

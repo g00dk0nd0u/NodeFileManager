@@ -89,7 +89,9 @@ class ServerTestCase(unittest.TestCase):
             with patch.object(NodeFileManagerHandler, "workspace", store), patch.object(NodeFileManagerHandler, "roots", roots), patch.object(NodeFileManagerHandler, "directories", directories):
                 status, body = self.request("GET", "/api/workspace")
                 self.assertEqual(status, 200)
-                self.assertEqual(json.loads(body)["state"], state)
+                restored = json.loads(body)["state"]
+                self.assertEqual(restored["version"], 2)
+                self.assertEqual(restored["nodes"]["saved"]["folderId"], "saved")
                 self.assertEqual(roots.path_for(folder_id(child)), child.resolve())
 
     def test_packaged_quit_is_rejected_during_mutation(self) -> None:
@@ -285,7 +287,10 @@ class FilesystemAndWorkspaceTestCase(unittest.TestCase):
             self.assertEqual(store.load()["roots"], [])
             state = {"version": 1, "roots": [{"path": "C:/Example"}], "nodes": {}, "viewport": {"x": 3, "y": 4, "zoom": 1.2}}
             store.save(state)
-            self.assertEqual(store.load(), state)
+            restored = store.load()
+            self.assertEqual(restored["version"], 2)
+            self.assertEqual(restored["roots"], state["roots"])
+            self.assertEqual(restored["viewport"], state["viewport"])
             path.unlink()
             self.assertEqual(store.load()["nodes"], {})
 

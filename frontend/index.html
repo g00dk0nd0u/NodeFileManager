@@ -18,7 +18,6 @@
         <span id="status" role="status">起動しています…</span>
       </header>
       <nav class="quick-access" aria-label="クイックアクセス">
-        <div class="quick-row"><strong>Favorites:</strong><div id="favorites" class="quick-chips"></div></div>
         <div class="quick-row"><strong>HOT:</strong><div id="hot" class="quick-chips"></div></div>
       </nav>
       <section id="canvas" tabindex="0">
@@ -27,6 +26,7 @@
         <p id="empty-hint">空のキャンバスを右クリックしてフォルダーを追加<br><small>背景ドラッグ: パン　ホイール: ズーム</small></p>
       </section>
       <div id="canvas-menu" class="context-menu" hidden><button data-action="select">Select Folder</button><button data-action="search">Search Workspace</button></div>
+      <div id="panel-menu" class="context-menu" hidden><button data-action="isolate">Isolate</button><button data-action="rename">Rename</button><button data-action="new">New Folder</button></div>
       <dialog id="folder-browser-dialog">
         <form method="dialog" id="folder-browser-form">
           <strong>Select Folder</strong>
@@ -43,6 +43,12 @@
         <form method="dialog">
           <label>New Folder <input id="new-folder-name" autocomplete="off" required></label>
           <div class="dialog-actions"><button value="cancel">Cancel</button><button id="new-folder-confirm" value="confirm">Create</button></div>
+        </form>
+      </dialog>
+      <dialog id="rename-dialog">
+        <form method="dialog">
+          <label>Rename <input id="rename-name" autocomplete="off" required></label>
+          <div class="dialog-actions"><button value="cancel">Cancel</button><button id="rename-confirm" value="confirm">Rename</button></div>
         </form>
       </dialog>
     </main>

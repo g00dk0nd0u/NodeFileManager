@@ -28,3 +28,12 @@ class WorkingSetDirectoryApiTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             service = DirectoryService(RootRegistry()); selected = service.select(directory)
             with self.assertRaises(ValueError): service.search(str(selected["id"]), "x")
+
+    def test_scoped_search_stops_at_traversal_budget_without_matches(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index in range(5): (root / f"unrelated-{index}.txt").write_text("x")
+            service = DirectoryService(RootRegistry()); selected = service.select(directory)
+            result = service.search(str(selected["id"]), "needle", max_entries=2)
+            self.assertTrue(result["truncated"])
+            self.assertEqual([], result["results"])

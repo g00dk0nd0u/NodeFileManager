@@ -1,6 +1,7 @@
 """Lazy immediate-directory metadata exposed to the frontend."""
 
 import os
+import time
 from pathlib import Path
 
 from .roots import RootRegistry
@@ -69,19 +70,45 @@ class DirectoryService:
         # exactly one real parent; never accept a client-provided path here.
         return self.metadata(self.roots.authorize_root(str(parent)))
 
-    def search(self, folder_id: str, query: str, limit: int = 100) -> dict[str, object]:
+    def search(
+        self,
+        folder_id: str,
+        query: str,
+        limit: int = 100,
+        max_entries: int = 10_000,
+        time_budget: float = 1.5,
+    ) -> dict[str, object]:
         term = query.strip().casefold()
         if len(term) < 2:
             raise ValueError("Search requires at least two characters")
         root = self.roots.get(folder_id)
         results: list[dict[str, object]] = []
-        for current, directories, files in os.walk(root, followlinks=False):
-            directories[:] = [name for name in directories if not (Path(current) / name).is_symlink()]
-            for name, kind in [(name, "folder") for name in directories] + [(name, "file") for name in files]:
-                if term not in name.casefold():
-                    continue
-                path = Path(current) / name
-                results.append(self.metadata(path))
-                if len(results) >= limit:
-                    return {"results": results, "truncated": True}
+        visited = 0
+        deadline = time.monotonic() + time_budget
+        pending = [root]
+        while pending:
+            current = pending.pop()
+            parent = self.metadata(current)
+            try:
+                entries = os.scandir(current)
+            except OSError:
+                continue
+            with entries:
+                for entry in entries:
+                    visited += 1
+                    if visited > max_entries or time.monotonic() >= deadline:
+                        return {"results": results, "truncated": True}
+                    if entry.is_symlink():
+                        continue
+                    is_folder = entry.is_dir(follow_symlinks=False)
+                    path = current / entry.name
+                    if is_folder:
+                        pending.append(path)
+                    if term not in entry.name.casefold():
+                        continue
+                    item = self.metadata(path, str(parent["id"]))
+                    item["parentFolder"] = parent
+                    results.append(item)
+                    if len(results) >= limit:
+                        return {"results": results, "truncated": True}
         return {"results": results, "truncated": False}

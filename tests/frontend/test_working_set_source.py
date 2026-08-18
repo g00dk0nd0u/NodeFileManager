@@ -80,19 +80,33 @@ class WorkingSetSourceInvariantTest(unittest.TestCase):
         self.assertIn("this.screenToWorld", edges)
         self.assertIn("canvasRect.left", edges)
         self.assertIn(" L ${exit.x}", edges)
-        self.assertIn(" C ${right?", edges)
+        self.assertIn("directChildren.length===1", edges)
+        self.assertIn("to=trail?{x:headerRect.left,y:headerRect.top+headerRect.height/2}:{x:headerRect.left+headerRect.width/2,y:headerRect.top}", edges)
+        self.assertNotIn("child.x>=parent.x", edges)
+        self.assertIn(" C ${trail?", edges)
 
     def test_working_set_has_no_continuous_bounds_transition(self):
         css = (ROOT / "frontend/css/canvas.css").read_text(encoding="utf-8")
         working_set = css[css.index(".working-set{"):css.index(".folder-node{")]
         self.assertNotIn("transition:", working_set)
 
-    def test_local_search_is_a_world_overlay_not_a_title_child(self):
+    def test_local_search_is_absolutely_anchored_to_its_panel(self):
         app = (ROOT / "frontend/js/app.js").read_text(encoding="utf-8")
         local = app[app.index("canvas.actions.localSearch"):app.index("function workspaceSearch")]
         self.assertIn('stack.className="local-search-stack"', local)
-        self.assertIn("canvas.world.append(stack)", local)
+        self.assertIn("panelElement.append(stack)", local)
+        self.assertNotIn("canvas.world.append(stack)", local)
+        self.assertNotIn("stack.style.transform", local)
         self.assertNotIn('querySelector(".node-title").append', local)
+
+    def test_compact_parent_uses_actual_local_search_height(self):
+        app = (ROOT / "frontend/js/app.js").read_text(encoding="utf-8")
+        css = (ROOT / "frontend/css/canvas.css").read_text(encoding="utf-8")
+        self.assertIn("stack.offsetHeight", app)
+        self.assertIn('setProperty("--local-search-height"', app)
+        self.assertIn('removeProperty("--local-search-height")', app)
+        self.assertIn("var(--local-search-height,0px)", css)
+        self.assertNotIn("205px", css)
 
     def test_folder_rename_reconciles_visible_descendant_identities(self):
         rename = self.canvas[self.canvas.index("async applyRename"):self.canvas.index("async reconcileVisibleDescendants")]

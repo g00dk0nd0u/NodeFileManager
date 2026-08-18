@@ -43,7 +43,7 @@ class WorkingSetSourceInvariantTest(unittest.TestCase):
         app = (ROOT / "frontend/js/app.js").read_text(encoding="utf-8")
         self.assertIn("reconcileMovedFolder(id,result.item)", app)
         self.assertIn("async reconcileMovedFolder(oldFolderId,movedItem)", self.canvas)
-        self.assertIn("folderId:movedItem.id", self.canvas)
+        self.assertIn("folderId:item.id", self.canvas)
         self.assertIn("await this.reconcileVisibleDescendants(root)", self.canvas)
         self.assertIn("folderId:current.id", self.canvas)
 
@@ -52,6 +52,19 @@ class WorkingSetSourceInvariantTest(unittest.TestCase):
         reattach = self.canvas[self.canvas.index("\n  reattach(panelId"):self.canvas.index("\n  cleanupSets()")]
         self.assertIn("delete child.compactParent", open_parent)
         self.assertIn("delete root.compactParent", reattach)
+
+    def test_refresh_prunes_external_deleted_materialized_branch_first(self):
+        refresh = self.canvas[self.canvas.index("async refresh(folderId"):self.canvas.index("async applyRename")]
+        self.assertIn("available=new Set(contents.folders.map", refresh)
+        self.assertIn("this.removeBranch(child.panelInstanceId)", refresh)
+        self.assertLess(refresh.index("this.removeBranch(child.panelInstanceId)"), refresh.index("await this.refreshBranch(child)"))
+        self.assertIn("if(node.visualParentPanelId){this.removeBranch", refresh)
+
+    def test_folder_rename_reconciles_visible_descendant_identities(self):
+        rename = self.canvas[self.canvas.index("async applyRename"):self.canvas.index("async reconcileVisibleDescendants")]
+        self.assertIn("reconcileFolderIdentity(oldId,item,false)", rename)
+        self.assertIn("await this.reconcileVisibleDescendants(root)", rename)
+        self.assertIn("folderId:item.id", rename)
 
 
 if __name__ == "__main__":

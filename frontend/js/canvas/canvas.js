@@ -71,8 +71,8 @@ export class FolderCanvas {
       x: parent.x + (parent.renderedWidth || panelWidth(parent)) + 70, y: parent.y };
     this.nodes.set(child.panelInstanceId, child); await this.loadNode(child); this.layoutFamily(parentPanelId); this.render(); this.changed(); this.actions.visit?.(folder.id);
   }
-  async openParent(childId) { const child=this.nodes.get(childId), folder=child?.compactParent; if(!child||!folder)return; const existing=this.panelForFolder(folder.id,child.workingSetId); if(existing){child.visualParentPanelId=existing.panelInstanceId;delete child.compactParent;this.render();this.changed();return;}
-    const parent={...folder,id:folder.id,folderId:folder.id,panelInstanceId:uid("panel"),workingSetId:child.workingSetId,visualParentPanelId:null,fsParentFolderId:null,x:child.x-panelWidth(folder)-70,y:child.y,childrenLoaded:false}; child.visualParentPanelId=parent.panelInstanceId; delete child.compactParent; this.nodes.set(parent.panelInstanceId,parent); await this.loadNode(parent); this.render();this.changed(); }
+  async openParent(childId) { const child=this.nodes.get(childId), folder=child?.compactParent; if(!child||!folder)return; const existing=this.panelForFolder(folder.id,child.workingSetId); if(existing){child.visualParentPanelId=existing.panelInstanceId;delete child.compactParent;this.layoutFamily(existing.panelInstanceId);this.render();this.changed();return;}
+    const parent={...folder,id:folder.id,folderId:folder.id,panelInstanceId:uid("panel"),workingSetId:child.workingSetId,visualParentPanelId:null,fsParentFolderId:null,x:child.x,y:child.y,childrenLoaded:false};child.visualParentPanelId=parent.panelInstanceId;delete child.compactParent;this.nodes.set(parent.panelInstanceId,parent);await this.loadNode(parent);parent.x=child.x-panelWidth(parent)-70;this.layoutFamily(parent.panelInstanceId);this.render();this.changed(); }
   revealPanel(panelId, rowId = null) { const node = this.nodes.get(panelId); if (!node) return false; this.clearSelection(); this.selected = panelId; this.render();
     this.viewport.x = this.canvas.clientWidth / 2 - (node.x + (node.renderedWidth || panelWidth(node)) / 2) * this.viewport.zoom; this.viewport.y = this.canvas.clientHeight / 2 - (node.y + (node.renderedHeight || 160) / 2) * this.viewport.zoom; this.updateViewport();
     const row = rowId && this.elements.get(panelId)?.querySelector(`[data-id="${CSS.escape(rowId)}"]`); if (row) { row.classList.add("match-pulse"); setTimeout(() => row.classList.remove("match-pulse"), 1200); } return true; }
@@ -86,8 +86,10 @@ export class FolderCanvas {
   render() {
     this.updateViewport();
     for (const [id, element] of this.elements) if (!this.nodes.has(id)) { element.remove(); this.elements.delete(id); }
+    const changedFamilies=new Set();
     for (const [id, node] of this.nodes) { let element = this.elements.get(id); if (!element) { element = createNodeElement(node, this.handlers()); this.elements.set(id, element); this.world.append(element); }
-      element.style.width=`${panelWidth(node)}px`;updateNodeElement(element, node, id === this.selected, this.selectedItem?.id, new Set([...this.nodes.values()].filter((child) => child.visualParentPanelId === id).map((child) => child.folderId)), this.handlers()); node.renderedWidth=element.offsetWidth;node.renderedHeight = element.offsetHeight; }
+      const previousWidth=node.renderedWidth;element.style.width=`${panelWidth(node)}px`;updateNodeElement(element, node, id === this.selected, this.selectedItem?.id, new Set([...this.nodes.values()].filter((child) => child.visualParentPanelId === id).map((child) => child.folderId)), this.handlers());node.renderedWidth=element.offsetWidth;node.renderedHeight=element.offsetHeight;if(previousWidth!==undefined&&previousWidth!==node.renderedWidth){changedFamilies.add(id);if(node.visualParentPanelId)changedFamilies.add(node.visualParentPanelId);} }
+    for(const parentId of changedFamilies)this.layoutFamily(parentId);if(changedFamilies.size)this.updatePositions();
     this.renderSets();this.renderEdges(); document.querySelector("#empty-hint").hidden = this.nodes.size > 0;
   }
   renderSets() {

@@ -108,6 +108,36 @@ class WorkingSetSourceInvariantTest(unittest.TestCase):
         self.assertIn("var(--local-search-height,0px)", css)
         self.assertNotIn("205px", css)
 
+    def test_mixed_compact_parent_is_loaded_before_family_positioning(self):
+        open_parent = self.canvas[self.canvas.index("async openParent"):self.canvas.index("\n  revealPanel")]
+        self.assertIn("await this.loadNode(parent)", open_parent)
+        self.assertIn("parent.x=child.x-panelWidth(parent)-70", open_parent)
+        self.assertIn("this.layoutFamily(parent.panelInstanceId)", open_parent)
+        self.assertLess(open_parent.index("await this.loadNode(parent)"), open_parent.index("panelWidth(parent)"))
+        self.assertNotIn("panelWidth(folder)", open_parent)
+
+    def test_width_transition_reflows_parent_trail_without_every_render_dancing(self):
+        render = self.canvas[self.canvas.index("\n  render()") : self.canvas.index("\n  renderSets()")]
+        self.assertIn("previousWidth=node.renderedWidth", render)
+        self.assertIn("previousWidth!==node.renderedWidth", render)
+        self.assertIn("changedFamilies.add(id)", render)
+        self.assertIn("this.layoutFamily(parentId)", render)
+        self.assertIn("if(changedFamilies.size)this.updatePositions()", render)
+
+    def test_sibling_width_transition_reflows_its_shelf(self):
+        render = self.canvas[self.canvas.index("\n  render()") : self.canvas.index("\n  renderSets()")]
+        self.assertIn("if(node.visualParentPanelId)changedFamilies.add(node.visualParentPanelId)", render)
+        layout = self.canvas[self.canvas.index("layoutFamily(parentId)") : self.canvas.index("async openSearchResult")]
+        self.assertIn("widths=children.map(child=>child.renderedWidth||panelWidth(child))", layout)
+        self.assertIn("x+=widths[index]+gap", layout)
+
+    def test_width_transition_does_not_reflow_unrelated_working_sets(self):
+        render = self.canvas[self.canvas.index("\n  render()") : self.canvas.index("\n  renderSets()")]
+        self.assertNotIn("for(const set", render)
+        self.assertNotIn("for(const workingSet", render)
+        self.assertNotIn("this.workingSets", render)
+        self.assertIn("for(const parentId of changedFamilies)", render)
+
     def test_folder_rename_reconciles_visible_descendant_identities(self):
         rename = self.canvas[self.canvas.index("async applyRename"):self.canvas.index("async reconcileVisibleDescendants")]
         self.assertIn("reconcileFolderIdentity(oldId,item,false)", rename)

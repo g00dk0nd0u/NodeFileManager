@@ -27,7 +27,7 @@ class WorkingSetSourceInvariantTest(unittest.TestCase):
 
     def test_second_sibling_reflows_entire_local_family(self):
         self.assertIn("if(children.length===1)", self.canvas)
-        self.assertIn("children.forEach((child,index)=>this.moveBranchTo", self.canvas)
+        self.assertIn("children.forEach((child,index)=>{this.moveBranchTo", self.canvas)
 
     def test_panel_header_does_not_mix_native_and_pointer_drag(self):
         self.assertNotIn('class="node-title" draggable="true"', self.node)
@@ -59,6 +59,84 @@ class WorkingSetSourceInvariantTest(unittest.TestCase):
         self.assertIn("this.removeBranch(child.panelInstanceId)", refresh)
         self.assertLess(refresh.index("this.removeBranch(child.panelInstanceId)"), refresh.index("await this.refreshBranch(child)"))
         self.assertIn("if(node.visualParentPanelId){this.removeBranch", refresh)
+
+    def test_panel_width_model_and_measured_bounds_are_centralized(self):
+        layout = (ROOT / "frontend/js/canvas/layout.js").read_text(encoding="utf-8")
+        self.assertIn("PANEL_WIDTH = Object.freeze({ single: 330, mixed: 430 })", layout)
+        self.assertIn("node.renderedWidth=element.offsetWidth", self.canvas)
+        self.assertIn("n.x + n.renderedWidth", self.canvas)
+        self.assertLess(self.canvas.index("node.renderedWidth=element.offsetWidth"), self.canvas.index("this.renderSets();this.renderEdges()"))
+
+    def test_panel_drag_only_moves_a_whole_working_set(self):
+        drag = self.canvas[self.canvas.index("\n  continueDrag(event)"):self.canvas.index("\n  endDrag(event)")]
+        self.assertIn('if(s.type==="set")for', drag)
+        self.assertNotIn('if(s.type==="panel")for', drag)
+
+    def test_connector_uses_row_header_and_viewport_conversion(self):
+        edges = self.canvas[self.canvas.index("renderEdges()") : self.canvas.index("\n\n  isolate(")]
+        self.assertIn('folder-item[data-id="${CSS.escape(child.folderId)}"]', edges)
+        self.assertIn('querySelector(".node-title")', edges)
+        self.assertIn("getBoundingClientRect()", edges)
+        self.assertIn("this.screenToWorld", edges)
+        self.assertIn("canvasRect.left", edges)
+        self.assertIn(" L ${exit.x}", edges)
+        self.assertIn("directChildren.length===1", edges)
+        self.assertIn("to=trail?{x:headerRect.left,y:headerRect.top+headerRect.height/2}:{x:headerRect.left+headerRect.width/2,y:headerRect.top}", edges)
+        self.assertNotIn("child.x>=parent.x", edges)
+        self.assertIn(" C ${trail?", edges)
+
+    def test_working_set_has_no_continuous_bounds_transition(self):
+        css = (ROOT / "frontend/css/canvas.css").read_text(encoding="utf-8")
+        working_set = css[css.index(".working-set{"):css.index(".folder-node{")]
+        self.assertNotIn("transition:", working_set)
+
+    def test_local_search_is_absolutely_anchored_to_its_panel(self):
+        app = (ROOT / "frontend/js/app.js").read_text(encoding="utf-8")
+        local = app[app.index("canvas.actions.localSearch"):app.index("function workspaceSearch")]
+        self.assertIn('stack.className="local-search-stack"', local)
+        self.assertIn("panelElement.append(stack)", local)
+        self.assertNotIn("canvas.world.append(stack)", local)
+        self.assertNotIn("stack.style.transform", local)
+        self.assertNotIn('querySelector(".node-title").append', local)
+
+    def test_compact_parent_uses_actual_local_search_height(self):
+        app = (ROOT / "frontend/js/app.js").read_text(encoding="utf-8")
+        css = (ROOT / "frontend/css/canvas.css").read_text(encoding="utf-8")
+        self.assertIn("stack.offsetHeight", app)
+        self.assertIn('setProperty("--local-search-height"', app)
+        self.assertIn('removeProperty("--local-search-height")', app)
+        self.assertIn("var(--local-search-height,0px)", css)
+        self.assertNotIn("205px", css)
+
+    def test_mixed_compact_parent_is_loaded_before_family_positioning(self):
+        open_parent = self.canvas[self.canvas.index("async openParent"):self.canvas.index("\n  revealPanel")]
+        self.assertIn("await this.loadNode(parent)", open_parent)
+        self.assertIn("parent.x=child.x-panelWidth(parent)-70", open_parent)
+        self.assertIn("this.layoutFamily(parent.panelInstanceId)", open_parent)
+        self.assertLess(open_parent.index("await this.loadNode(parent)"), open_parent.index("panelWidth(parent)"))
+        self.assertNotIn("panelWidth(folder)", open_parent)
+
+    def test_width_transition_reflows_parent_trail_without_every_render_dancing(self):
+        render = self.canvas[self.canvas.index("\n  render()") : self.canvas.index("\n  renderSets()")]
+        self.assertIn("previousWidth=node.renderedWidth", render)
+        self.assertIn("previousWidth!==node.renderedWidth", render)
+        self.assertIn("changedFamilies.add(id)", render)
+        self.assertIn("this.layoutFamily(parentId)", render)
+        self.assertIn("if(changedFamilies.size)this.updatePositions()", render)
+
+    def test_sibling_width_transition_reflows_its_shelf(self):
+        render = self.canvas[self.canvas.index("\n  render()") : self.canvas.index("\n  renderSets()")]
+        self.assertIn("if(node.visualParentPanelId)changedFamilies.add(node.visualParentPanelId)", render)
+        layout = self.canvas[self.canvas.index("layoutFamily(parentId)") : self.canvas.index("async openSearchResult")]
+        self.assertIn("widths=children.map(child=>child.renderedWidth||panelWidth(child))", layout)
+        self.assertIn("x+=widths[index]+gap", layout)
+
+    def test_width_transition_does_not_reflow_unrelated_working_sets(self):
+        render = self.canvas[self.canvas.index("\n  render()") : self.canvas.index("\n  renderSets()")]
+        self.assertNotIn("for(const set", render)
+        self.assertNotIn("for(const workingSet", render)
+        self.assertNotIn("this.workingSets", render)
+        self.assertIn("for(const parentId of changedFamilies)", render)
 
     def test_folder_rename_reconciles_visible_descendant_identities(self):
         rename = self.canvas[self.canvas.index("async applyRename"):self.canvas.index("async reconcileVisibleDescendants")]

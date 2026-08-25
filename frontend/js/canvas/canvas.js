@@ -1,6 +1,6 @@
 import { createNodeElement, updateNodeElement, updatePreviewElement } from "./node.js";
 import { applyViewport } from "./viewport.js";
-import { panelWidth } from "./layout.js";
+import { BRANCH_SPACING, panelWidth } from "./layout.js";
 
 const uid = (prefix) => `${prefix}-${crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`}`;
 
@@ -55,6 +55,17 @@ export class FolderCanvas {
     if (!node.visualParentPanelId && this.actions.getParent) { const response = await this.actions.getParent(node.folderId); node.compactParent = response.parent; node.fsParentFolderId = response.parent?.id || null; } }
   panelForFolder(folderId, setId) { return [...this.nodes.values()].find((node) => node.folderId === folderId && node.workingSetId === setId); }
   descendants(panelId) { const direct = [...this.nodes.values()].filter((node) => node.visualParentPanelId === panelId); return direct.flatMap((node) => [node, ...this.descendants(node.panelInstanceId)]); }
+  directChildren(panelId) { return [...this.nodes.values()].filter((node) => node.visualParentPanelId === panelId); }
+  branchBounds(panelId) {
+    const branch=[this.nodes.get(panelId),...this.descendants(panelId)].filter(Boolean);
+    if(!branch.length)return null;
+    return {
+      left:Math.min(...branch.map(node=>node.x)),
+      top:Math.min(...branch.map(node=>node.y)),
+      right:Math.max(...branch.map(node=>node.x+(node.renderedWidth||panelWidth(node)))),
+      bottom:Math.max(...branch.map(node=>node.y+(node.renderedHeight||220)))
+    };
+  }
 
   handlers() { return { folder: (panelId, folder) => this.openChild(panelId, folder), parent: (id) => this.openParent(id), close: (id) => this.closeNode(id), search: (id) => this.actions.localSearch?.(id),
     isolate: (id) => this.isolate(id), reattach: (id) => this.reattach(id), panelMenu: (id,x,y) => this.actions.panelMenu?.(id,x,y), newFolder: (id) => this.actions.newFolder?.(this.nodes.get(id)?.folderId),
@@ -68,28 +79,50 @@ export class FolderCanvas {
     const siblings = [...this.nodes.values()].filter((node) => node.visualParentPanelId === parentPanelId);
     const child = { ...folder, id: folder.id, folderId: folder.id, panelInstanceId: uid("panel"), workingSetId: parent.workingSetId,
       visualParentPanelId: parentPanelId, fsParentFolderId: parent.folderId, childrenLoaded: false,
-      x: parent.x + (parent.renderedWidth || panelWidth(parent)) + 70, y: parent.y };
-    this.nodes.set(child.panelInstanceId, child); await this.loadNode(child); this.layoutFamily(parentPanelId); this.render(); this.changed(); this.actions.visit?.(folder.id);
+      x: parent.x + (parent.renderedWidth || panelWidth(parent)) + BRANCH_SPACING.trail, y: parent.y };
+    this.nodes.set(child.panelInstanceId, child); await this.loadNode(child); this.reflowHierarchy(parentPanelId); this.render(); this.changed(); this.actions.visit?.(folder.id);
   }
-  async openParent(childId) { const child=this.nodes.get(childId), folder=child?.compactParent; if(!child||!folder)return; const existing=this.panelForFolder(folder.id,child.workingSetId); if(existing){child.visualParentPanelId=existing.panelInstanceId;delete child.compactParent;this.layoutFamily(existing.panelInstanceId);this.render();this.changed();return;}
-    const parent={...folder,id:folder.id,folderId:folder.id,panelInstanceId:uid("panel"),workingSetId:child.workingSetId,visualParentPanelId:null,fsParentFolderId:null,x:child.x,y:child.y,childrenLoaded:false};child.visualParentPanelId=parent.panelInstanceId;delete child.compactParent;this.nodes.set(parent.panelInstanceId,parent);await this.loadNode(parent);parent.x=child.x-panelWidth(parent)-70;this.layoutFamily(parent.panelInstanceId);this.render();this.changed(); }
+  async openParent(childId) { const child=this.nodes.get(childId), folder=child?.compactParent; if(!child||!folder)return; const existing=this.panelForFolder(folder.id,child.workingSetId); if(existing){child.visualParentPanelId=existing.panelInstanceId;delete child.compactParent;this.reflowHierarchy(existing.panelInstanceId);this.render();this.changed();return;}
+    const parent={...folder,id:folder.id,folderId:folder.id,panelInstanceId:uid("panel"),workingSetId:child.workingSetId,visualParentPanelId:null,fsParentFolderId:null,x:child.x,y:child.y,childrenLoaded:false};child.visualParentPanelId=parent.panelInstanceId;delete child.compactParent;this.nodes.set(parent.panelInstanceId,parent);await this.loadNode(parent);parent.x=child.x-panelWidth(parent)-BRANCH_SPACING.trail;this.layoutFamily(parent.panelInstanceId);this.render();this.changed(); }
   revealPanel(panelId, rowId = null) { const node = this.nodes.get(panelId); if (!node) return false; this.clearSelection(); this.selected = panelId; this.render();
     this.viewport.x = this.canvas.clientWidth / 2 - (node.x + (node.renderedWidth || panelWidth(node)) / 2) * this.viewport.zoom; this.viewport.y = this.canvas.clientHeight / 2 - (node.y + (node.renderedHeight || 160) / 2) * this.viewport.zoom; this.updateViewport();
     const row = rowId && this.elements.get(panelId)?.querySelector(`[data-id="${CSS.escape(rowId)}"]`); if (row) { row.classList.add("match-pulse"); setTimeout(() => row.classList.remove("match-pulse"), 1200); } return true; }
   revealNode(folderId) { const panel = [...this.nodes.values()].find((node) => node.folderId === folderId); return panel ? this.revealPanel(panel.panelInstanceId) : false; }
   moveBranchTo(panelId,x,y) { const root=this.nodes.get(panelId); if(!root)return; const dx=x-root.x,dy=y-root.y; for(const node of [root,...this.descendants(panelId)]){node.x+=dx;node.y+=dy;} }
-  layoutFamily(parentId) { const parent=this.nodes.get(parentId),children=[...this.nodes.values()].filter(node=>node.visualParentPanelId===parentId).sort((a,b)=>a.x-b.x); if(!parent||!children.length)return;
-    if(children.length===1){this.moveBranchTo(children[0].panelInstanceId,parent.x+(parent.renderedWidth||panelWidth(parent))+70,parent.y);return;} const gap=40,widths=children.map(child=>child.renderedWidth||panelWidth(child)),total=widths.reduce((sum,width)=>sum+width,0)+(children.length-1)*gap,start=parent.x+(parent.renderedWidth||panelWidth(parent))/2-total/2,y=parent.y+(parent.renderedHeight||220)+70;let x=start;children.forEach((child,index)=>{this.moveBranchTo(child.panelInstanceId,x,y);x+=widths[index]+gap;}); }
+  layoutFamily(parentId) {
+    const parent=this.nodes.get(parentId),children=this.directChildren(parentId).sort((a,b)=>a.x-b.x);
+    if(!parent||!children.length)return;
+    for(const child of children)this.layoutFamily(child.panelInstanceId);
+    if(children.length===1){
+      const child=children[0],bounds=this.branchBounds(child.panelInstanceId),desiredBranchLeft=parent.x+(parent.renderedWidth||panelWidth(parent))+BRANCH_SPACING.trail;
+      this.moveBranchTo(child.panelInstanceId,child.x+desiredBranchLeft-bounds.left,parent.y);
+      return;
+    }
+    const bounds=children.map(child=>this.branchBounds(child.panelInstanceId));
+    const total=bounds.reduce((sum,bound)=>sum+bound.right-bound.left,0)+(children.length-1)*BRANCH_SPACING.shelfX;
+    let branchLeft=parent.x+(parent.renderedWidth||panelWidth(parent))/2-total/2;
+    const shelfTop=parent.y+(parent.renderedHeight||220)+BRANCH_SPACING.shelfY;
+    children.forEach((child,index)=>{
+      const bound=bounds[index];
+      this.moveBranchTo(child.panelInstanceId,child.x+branchLeft-bound.left,child.y+shelfTop-bound.top);
+      branchLeft+=bound.right-bound.left+BRANCH_SPACING.shelfX;
+    });
+  }
+  reflowHierarchy(panelId) {
+    let root=this.nodes.get(panelId);if(!root)return;
+    while(root.visualParentPanelId&&this.nodes.has(root.visualParentPanelId))root=this.nodes.get(root.visualParentPanelId);
+    this.layoutFamily(root.panelInstanceId);
+  }
   async openSearchResult(originPanelId,item) { const origin=this.nodes.get(originPanelId),owner=item.parentFolder;if(!origin||!owner)return;let panel=this.panelForFolder(owner.id,origin.workingSetId);
     if(!panel){panel={...owner,id:owner.id,folderId:owner.id,panelInstanceId:uid("panel"),workingSetId:origin.workingSetId,visualParentPanelId:null,fsParentFolderId:null,x:origin.x,y:origin.y-260,childrenLoaded:false};this.nodes.set(panel.panelInstanceId,panel);await this.loadNode(panel);this.render();this.changed();}this.revealPanel(panel.panelInstanceId,item.id); }
 
   render() {
     this.updateViewport();
     for (const [id, element] of this.elements) if (!this.nodes.has(id)) { element.remove(); this.elements.delete(id); }
-    const changedFamilies=new Set();
+    const changedBranches=new Set();
     for (const [id, node] of this.nodes) { let element = this.elements.get(id); if (!element) { element = createNodeElement(node, this.handlers()); this.elements.set(id, element); this.world.append(element); }
-      const previousWidth=node.renderedWidth;element.style.width=`${panelWidth(node)}px`;updateNodeElement(element, node, id === this.selected, this.selectedItem?.id, new Set([...this.nodes.values()].filter((child) => child.visualParentPanelId === id).map((child) => child.folderId)), this.handlers());node.renderedWidth=element.offsetWidth;node.renderedHeight=element.offsetHeight;if(previousWidth!==undefined&&previousWidth!==node.renderedWidth){changedFamilies.add(id);if(node.visualParentPanelId)changedFamilies.add(node.visualParentPanelId);} }
-    for(const parentId of changedFamilies)this.layoutFamily(parentId);if(changedFamilies.size)this.updatePositions();
+      const previousWidth=node.renderedWidth,previousHeight=node.renderedHeight;element.style.width=`${panelWidth(node)}px`;updateNodeElement(element, node, id === this.selected, this.selectedItem?.id, new Set(this.directChildren(id).map((child) => child.folderId)), this.handlers());node.renderedWidth=element.offsetWidth;node.renderedHeight=element.offsetHeight;if(previousWidth!==node.renderedWidth||previousHeight!==node.renderedHeight)changedBranches.add(id); }
+    for(const panelId of changedBranches)this.reflowHierarchy(panelId);if(changedBranches.size)this.updatePositions();
     this.renderSets();this.renderEdges(); document.querySelector("#empty-hint").hidden = this.nodes.size > 0;
   }
   renderSets() {
@@ -99,26 +132,45 @@ export class FolderCanvas {
       const minX = Math.min(...members.map(n => n.x)) - 42, minY = Math.min(...members.map(n => n.y)) - 58, maxX = Math.max(...members.map(n => n.x + n.renderedWidth)) + 42, maxY = Math.max(...members.map(n => n.y + n.renderedHeight)) + 42;
       const style=this.dragSession?.type==="panel"&&this.dragSession.sourceSetId===id?this.dragSession.frozenStyle:{ transform: `translate(${minX}px,${minY}px)`, width: `${maxX-minX}px`, height: `${maxY-minY}px` }; Object.assign(el.style,style); }
   }
-  renderEdges() { this.edges.replaceChildren();const canvasRect=this.canvas.getBoundingClientRect();for(const child of this.nodes.values()){const parent=this.nodes.get(child.visualParentPanelId);if(!parent)continue;const parentElement=this.elements.get(parent.panelInstanceId),childElement=this.elements.get(child.panelInstanceId),sourceRow=parentElement?.querySelector(`.folder-item[data-id="${CSS.escape(child.folderId)}"]`),header=childElement?.querySelector(".node-title");if(!sourceRow||!header)continue;const directChildren=[...this.nodes.values()].filter(node=>node.visualParentPanelId===parent.panelInstanceId),trail=directChildren.length===1,rowRect=sourceRow.getBoundingClientRect(),headerRect=header.getBoundingClientRect();const from=trail?{x:rowRect.right,y:rowRect.top+rowRect.height/2}:{x:rowRect.left+rowRect.width/2,y:rowRect.bottom},to=trail?{x:headerRect.left,y:headerRect.top+headerRect.height/2}:{x:headerRect.left+headerRect.width/2,y:headerRect.top};const source=this.screenToWorld(from.x-canvasRect.left,from.y-canvasRect.top),target=this.screenToWorld(to.x-canvasRect.left,to.y-canvasRect.top),exit=trail?{x:source.x+18,y:source.y}:{x:source.x,y:source.y+18},approach=trail?{x:target.x-18,y:target.y}:{x:target.x,y:target.y-18},mx=(exit.x+approach.x)/2,my=(exit.y+approach.y)/2;const path=document.createElementNS("http://www.w3.org/2000/svg","path");path.setAttribute("d",`M ${source.x} ${source.y} L ${exit.x} ${exit.y} C ${trail?mx:exit.x} ${trail?exit.y:my}, ${trail?mx:approach.x} ${trail?approach.y:my}, ${approach.x} ${approach.y} L ${target.x} ${target.y}`);this.edges.append(path);}}
+  roundedRoute(points,radius=10) {
+    points=points.filter((point,index)=>!index||point.x!==points[index-1].x||point.y!==points[index-1].y);
+    if(points.length<2)return "";let route=`M ${points[0].x} ${points[0].y}`;
+    for(let index=1;index<points.length-1;index++){const previous=points[index-1],corner=points[index],next=points[index+1],incoming=Math.hypot(corner.x-previous.x,corner.y-previous.y),outgoing=Math.hypot(next.x-corner.x,next.y-corner.y),bend=Math.min(radius,incoming/2,outgoing/2),before={x:corner.x+(previous.x-corner.x)*bend/incoming,y:corner.y+(previous.y-corner.y)*bend/incoming},after={x:corner.x+(next.x-corner.x)*bend/outgoing,y:corner.y+(next.y-corner.y)*bend/outgoing};route+=` L ${before.x} ${before.y} Q ${corner.x} ${corner.y} ${after.x} ${after.y}`;}
+    const last=points.at(-1);return `${route} L ${last.x} ${last.y}`;
+  }
+  renderEdges() {
+    this.edges.replaceChildren();const canvasRect=this.canvas.getBoundingClientRect();
+    for(const child of this.nodes.values()){
+      const parent=this.nodes.get(child.visualParentPanelId);if(!parent)continue;
+      const parentElement=this.elements.get(parent.panelInstanceId),childElement=this.elements.get(child.panelInstanceId),sourceRow=parentElement?.querySelector(`.folder-item[data-id="${CSS.escape(child.folderId)}"]`),header=childElement?.querySelector(".node-title");if(!sourceRow||!header)continue;
+      const trail=this.directChildren(parent.panelInstanceId).length===1,rowRect=sourceRow.getBoundingClientRect(),headerRect=header.getBoundingClientRect(),parentRect=parentElement.getBoundingClientRect();
+      const from={x:rowRect.right,y:rowRect.top+rowRect.height/2},to=trail?{x:headerRect.left,y:headerRect.top+headerRect.height/2}:{x:headerRect.left+headerRect.width/2,y:headerRect.top};
+      const source=this.screenToWorld(from.x-canvasRect.left,from.y-canvasRect.top),target=this.screenToWorld(to.x-canvasRect.left,to.y-canvasRect.top),parentRight=this.screenToWorld(parentRect.right-canvasRect.left,0).x;
+      let points;
+      if(trail){const exit={x:Math.min(target.x-18,Math.max(source.x+18,parentRight+18)),y:source.y},approach={x:target.x-18,y:target.y},middle=(exit.x+approach.x)/2;points=[source,exit,{x:middle,y:exit.y},{x:middle,y:approach.y},approach,target];}
+      else{const shelfTop=Math.min(...this.directChildren(parent.panelInstanceId).map(node=>node.y)),parentBottom=parent.y+(parent.renderedHeight||220),railY=(parentBottom+shelfTop)/2,exitX=parentRight+18;points=[source,{x:exitX,y:source.y},{x:exitX,y:railY},{x:target.x,y:railY},{x:target.x,y:target.y-18},target];}
+      const path=document.createElementNS("http://www.w3.org/2000/svg","path");path.setAttribute("d",this.roundedRoute(points));this.edges.append(path);
+    }
+  }
 
-  isolate(panelId) { const root = this.nodes.get(panelId),parent=this.nodes.get(root?.visualParentPanelId); if (!root || !parent) return false; const setId = this.newSet(); root.compactParent={id:parent.folderId,name:parent.name,path:parent.path,kind:"folder"};root.fsParentFolderId=parent.folderId;root.visualParentPanelId = null; for (const node of [root, ...this.descendants(panelId)]) node.workingSetId = setId; this.cleanupSets(); this.render(); this.changed();return true; }
+  isolate(panelId) { const root = this.nodes.get(panelId),parent=this.nodes.get(root?.visualParentPanelId); if (!root || !parent) return false; const setId = this.newSet(); root.compactParent={id:parent.folderId,name:parent.name,path:parent.path,kind:"folder"};root.fsParentFolderId=parent.folderId;root.visualParentPanelId = null; for (const node of [root, ...this.descendants(panelId)]) node.workingSetId = setId; this.reflowHierarchy(parent.panelInstanceId);this.reflowHierarchy(root.panelInstanceId);this.cleanupSets(); this.render(); this.changed();return true; }
   reattach(panelId, destinationSetId = null) { const root = this.nodes.get(panelId); if (!root || root.visualParentPanelId || !root.fsParentFolderId) return false;
     const parent = [...this.nodes.values()].find((node) => node.folderId === root.fsParentFolderId && node.workingSetId !== root.workingSetId && (!destinationSetId || node.workingSetId === destinationSetId)); if (!parent) return false;
     if (this.panelForFolder(root.folderId, parent.workingSetId)) return false; const old = root.workingSetId; root.visualParentPanelId = parent.panelInstanceId; delete root.compactParent;
-    for (const node of [root, ...this.descendants(panelId)]) node.workingSetId = parent.workingSetId; this.layoutFamily(parent.panelInstanceId); this.workingSets.delete(old); this.render(); this.changed(); return true; }
+    for (const node of [root, ...this.descendants(panelId)]) node.workingSetId = parent.workingSetId; this.reflowHierarchy(parent.panelInstanceId); this.workingSets.delete(old); this.render(); this.changed(); return true; }
   cleanupSets() { for (const id of [...this.workingSets.keys()]) if (![...this.nodes.values()].some(n => n.workingSetId === id)) this.workingSets.delete(id); }
   removeBranch(panelId) { const removed=[this.nodes.get(panelId),...this.descendants(panelId)].filter(Boolean);if(removed.some(node=>node.panelInstanceId===this.selected||node.folderId===this.selectedItem?.parentId))this.clearSelection();for(const node of removed)this.nodes.delete(node.panelInstanceId); }
-  closeNode(panelId) { this.removeBranch(panelId); this.cleanupSets(); this.clearSelection(); this.render(); this.changed(); }
+  closeNode(panelId) { const parentId=this.nodes.get(panelId)?.visualParentPanelId;this.removeBranch(panelId);if(parentId)this.reflowHierarchy(parentId);this.cleanupSets(); this.clearSelection(); this.render(); this.changed(); }
 
   dropFilesystem(event, destinationFolderId, region) { const kind=event.dataTransfer.getData("application/x-nodefilemanager-kind"), id=event.dataTransfer.getData("application/x-nodefilemanager-item"); if (!id || kind !== region) return; this.actions.transfer?.(id, destinationFolderId, event.altKey, kind); }
   preview(panelId, file) { const node=this.nodes.get(panelId); if (![".pdf",".jpg",".jpeg",".png"].includes((file.extension||"").toLowerCase())) { if(node?.preview)this.closePreview(panelId); return; } node.preview={...file,page:1}; this.updatePreview(panelId); this.changed(); }
   closePreview(id){const n=this.nodes.get(id);if(!n)return;delete n.preview;this.updatePreview(id);this.changed();} previewPage(id,d){const p=this.nodes.get(id)?.preview;if(!p)return;p.page=Math.max(1,p.page+d);this.updatePreview(id);}
-  updatePreview(id){const n=this.nodes.get(id),e=this.elements.get(id);if(n&&e)updatePreviewElement(e,n,this.handlers());} previewResized(id){const n=this.nodes.get(id),e=this.elements.get(id);if(n&&e)n.renderedHeight=e.offsetHeight;this.renderSets();}
+  updatePreview(id){const n=this.nodes.get(id),e=this.elements.get(id);if(n&&e)updatePreviewElement(e,n,this.handlers());} previewResized(id){const n=this.nodes.get(id),e=this.elements.get(id);if(n&&e){n.renderedHeight=e.offsetHeight;this.reflowHierarchy(id);this.updatePositions();this.renderSets();this.renderEdges();}}
   selectFolder(id){this.clearSelection();this.selected=id;this.elements.get(id)?.classList.add("selected");} selectFile(file,el){this.clearSelection();this.selectedItem=file;el.classList.add("selected");}
   clearSelection(){this.world.querySelector(".file-item.selected")?.classList.remove("selected");if(this.selected)this.elements.get(this.selected)?.classList.remove("selected");this.selected=null;this.selectedItem=null;}
   updateFavoriteStates() {}
   visibleFolders(){return [...this.nodes.values()];}
-  async refresh(folderId=null){const targets=folderId?[...this.nodes.values()].filter(node=>node.folderId===folderId):[...this.nodes.values()].filter(node=>!node.visualParentPanelId);for(const node of targets)await this.refreshBranch(node);this.cleanupSets();this.render();this.changed();}
+  async refresh(folderId=null){const targets=folderId?[...this.nodes.values()].filter(node=>node.folderId===folderId):[...this.nodes.values()].filter(node=>!node.visualParentPanelId);for(const node of targets)await this.refreshBranch(node);for(const node of targets)this.reflowHierarchy(node.panelInstanceId);this.cleanupSets();this.render();this.changed();}
   async refreshBranch(node){if(!this.nodes.has(node.panelInstanceId))return;let contents;try{contents=await this.loadChildren(node.folderId);}catch(error){if(node.visualParentPanelId){this.removeBranch(node.panelInstanceId);return;}throw error;}node.folders=contents.folders;node.files=contents.files;node.childrenLoaded=true;const available=new Set(contents.folders.map(folder=>folder.id));for(const child of [...this.nodes.values()].filter(panel=>panel.visualParentPanelId===node.panelInstanceId))if(!available.has(child.folderId))this.removeBranch(child.panelInstanceId);for(const child of [...this.nodes.values()].filter(panel=>panel.visualParentPanelId===node.panelInstanceId))await this.refreshBranch(child);}
   async applyRename(oldId,item){if(item.kind!=="folder")return;await this.reconcileFolderIdentity(oldId,item,false);}
   async reconcileMovedFolder(oldFolderId,movedItem) { await this.reconcileFolderIdentity(oldFolderId,movedItem,true); }

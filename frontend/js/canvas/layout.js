@@ -1,4 +1,5 @@
 export const PANEL_WIDTH = Object.freeze({ single: 330, mixed: 430 });
+export const BRANCH_SPACING = Object.freeze({ trail: 70, shelfX: 70, shelfY: 70 });
 
 export function panelWidth(node) {
   return (node.files?.length && node.folders?.length) ? PANEL_WIDTH.mixed : PANEL_WIDTH.single;

@@ -27,7 +27,8 @@ class WorkingSetSourceInvariantTest(unittest.TestCase):
 
     def test_second_sibling_reflows_entire_local_family(self):
         self.assertIn("if(children.length===1)", self.canvas)
-        self.assertIn("children.forEach((child,index)=>{this.moveBranchTo", self.canvas)
+        self.assertIn("for(const child of children)this.layoutFamily(child.panelInstanceId)", self.canvas)
+        self.assertIn("this.moveBranchTo(child.panelInstanceId,child.x+branchLeft-bound.left", self.canvas)
 
     def test_panel_header_does_not_mix_native_and_pointer_drag(self):
         self.assertNotIn('class="node-title" draggable="true"', self.node)
@@ -79,11 +80,13 @@ class WorkingSetSourceInvariantTest(unittest.TestCase):
         self.assertIn("getBoundingClientRect()", edges)
         self.assertIn("this.screenToWorld", edges)
         self.assertIn("canvasRect.left", edges)
-        self.assertIn(" L ${exit.x}", edges)
-        self.assertIn("directChildren.length===1", edges)
+        self.assertIn("from={x:rowRect.right,y:rowRect.top+rowRect.height/2}", edges)
+        self.assertIn("this.directChildren(parent.panelInstanceId).length===1", edges)
         self.assertIn("to=trail?{x:headerRect.left,y:headerRect.top+headerRect.height/2}:{x:headerRect.left+headerRect.width/2,y:headerRect.top}", edges)
         self.assertNotIn("child.x>=parent.x", edges)
-        self.assertIn(" C ${trail?", edges)
+        self.assertIn("this.roundedRoute(points)", edges)
+        self.assertIn(" Q ${corner.x} ${corner.y}", edges)
+        self.assertNotIn(" C ", edges)
 
     def test_working_set_has_no_continuous_bounds_transition(self):
         css = (ROOT / "frontend/css/canvas.css").read_text(encoding="utf-8")
@@ -111,7 +114,7 @@ class WorkingSetSourceInvariantTest(unittest.TestCase):
     def test_mixed_compact_parent_is_loaded_before_family_positioning(self):
         open_parent = self.canvas[self.canvas.index("async openParent"):self.canvas.index("\n  revealPanel")]
         self.assertIn("await this.loadNode(parent)", open_parent)
-        self.assertIn("parent.x=child.x-panelWidth(parent)-70", open_parent)
+        self.assertIn("parent.x=child.x-panelWidth(parent)-BRANCH_SPACING.trail", open_parent)
         self.assertIn("this.layoutFamily(parent.panelInstanceId)", open_parent)
         self.assertLess(open_parent.index("await this.loadNode(parent)"), open_parent.index("panelWidth(parent)"))
         self.assertNotIn("panelWidth(folder)", open_parent)
@@ -120,23 +123,49 @@ class WorkingSetSourceInvariantTest(unittest.TestCase):
         render = self.canvas[self.canvas.index("\n  render()") : self.canvas.index("\n  renderSets()")]
         self.assertIn("previousWidth=node.renderedWidth", render)
         self.assertIn("previousWidth!==node.renderedWidth", render)
-        self.assertIn("changedFamilies.add(id)", render)
-        self.assertIn("this.layoutFamily(parentId)", render)
-        self.assertIn("if(changedFamilies.size)this.updatePositions()", render)
+        self.assertIn("changedBranches.add(id)", render)
+        self.assertIn("this.reflowHierarchy(panelId)", render)
+        self.assertIn("if(changedBranches.size)this.updatePositions()", render)
 
     def test_sibling_width_transition_reflows_its_shelf(self):
         render = self.canvas[self.canvas.index("\n  render()") : self.canvas.index("\n  renderSets()")]
-        self.assertIn("if(node.visualParentPanelId)changedFamilies.add(node.visualParentPanelId)", render)
+        self.assertIn("this.reflowHierarchy(panelId)", render)
         layout = self.canvas[self.canvas.index("layoutFamily(parentId)") : self.canvas.index("async openSearchResult")]
-        self.assertIn("widths=children.map(child=>child.renderedWidth||panelWidth(child))", layout)
-        self.assertIn("x+=widths[index]+gap", layout)
+        self.assertIn("bounds=children.map(child=>this.branchBounds(child.panelInstanceId))", layout)
+        self.assertIn("branchLeft+=bound.right-bound.left+BRANCH_SPACING.shelfX", layout)
 
     def test_width_transition_does_not_reflow_unrelated_working_sets(self):
         render = self.canvas[self.canvas.index("\n  render()") : self.canvas.index("\n  renderSets()")]
         self.assertNotIn("for(const set", render)
         self.assertNotIn("for(const workingSet", render)
         self.assertNotIn("this.workingSets", render)
-        self.assertIn("for(const parentId of changedFamilies)", render)
+        self.assertIn("for(const panelId of changedBranches)", render)
+
+    def test_branch_bounds_include_every_materialized_descendant(self):
+        bounds = self.canvas[self.canvas.index("branchBounds(panelId)") : self.canvas.index("\n\n  handlers()")]
+        self.assertIn("...this.descendants(panelId)", bounds)
+        self.assertIn("node.x+(node.renderedWidth||panelWidth(node))", bounds)
+        self.assertIn("node.y+(node.renderedHeight||220)", bounds)
+
+    def test_branch_shelf_gap_and_trail_spacing_are_centralized(self):
+        layout = (ROOT / "frontend/js/canvas/layout.js").read_text(encoding="utf-8")
+        self.assertIn("BRANCH_SPACING = Object.freeze({ trail: 70, shelfX: 70, shelfY: 70 })", layout)
+        family = self.canvas[self.canvas.index("layoutFamily(parentId)") : self.canvas.index("async openSearchResult")]
+        self.assertIn("BRANCH_SPACING.trail,parent.y", family)
+        self.assertIn("(children.length-1)*BRANCH_SPACING.shelfX", family)
+
+    def test_deep_geometry_change_bubbles_only_to_its_hierarchy_root(self):
+        reflow = self.canvas[self.canvas.index("reflowHierarchy(panelId)") : self.canvas.index("async openSearchResult")]
+        self.assertIn("while(root.visualParentPanelId", reflow)
+        self.assertIn("this.layoutFamily(root.panelInstanceId)", reflow)
+        self.assertNotIn("workingSets", reflow)
+        self.assertNotIn("for(const root", reflow)
+
+    def test_connectors_render_after_layout_positions_and_set_bounds(self):
+        render = self.canvas[self.canvas.index("\n  render()") : self.canvas.index("\n  renderSets()")]
+        self.assertLess(render.index("this.reflowHierarchy(panelId)"), render.index("this.updatePositions()"))
+        self.assertLess(render.index("this.updatePositions()"), render.index("this.renderSets()"))
+        self.assertLess(render.index("this.renderSets()"), render.index("this.renderEdges()"))
 
     def test_folder_rename_reconciles_visible_descendant_identities(self):
         rename = self.canvas[self.canvas.index("async applyRename"):self.canvas.index("async reconcileVisibleDescendants")]

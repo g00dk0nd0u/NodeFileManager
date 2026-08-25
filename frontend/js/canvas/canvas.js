@@ -94,7 +94,8 @@ export class FolderCanvas {
     if(!parent||!children.length)return;
     for(const child of children)this.layoutFamily(child.panelInstanceId);
     if(children.length===1){
-      this.moveBranchTo(children[0].panelInstanceId,parent.x+(parent.renderedWidth||panelWidth(parent))+BRANCH_SPACING.trail,parent.y);
+      const child=children[0],bounds=this.branchBounds(child.panelInstanceId),desiredBranchLeft=parent.x+(parent.renderedWidth||panelWidth(parent))+BRANCH_SPACING.trail;
+      this.moveBranchTo(child.panelInstanceId,child.x+desiredBranchLeft-bounds.left,parent.y);
       return;
     }
     const bounds=children.map(child=>this.branchBounds(child.panelInstanceId));

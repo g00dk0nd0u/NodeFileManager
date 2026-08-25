@@ -151,7 +151,8 @@ class WorkingSetSourceInvariantTest(unittest.TestCase):
         layout = (ROOT / "frontend/js/canvas/layout.js").read_text(encoding="utf-8")
         self.assertIn("BRANCH_SPACING = Object.freeze({ trail: 70, shelfX: 70, shelfY: 70 })", layout)
         family = self.canvas[self.canvas.index("layoutFamily(parentId)") : self.canvas.index("async openSearchResult")]
-        self.assertIn("BRANCH_SPACING.trail,parent.y", family)
+        self.assertIn("bounds=this.branchBounds(child.panelInstanceId)", family)
+        self.assertIn("child.x+desiredBranchLeft-bounds.left,parent.y", family)
         self.assertIn("(children.length-1)*BRANCH_SPACING.shelfX", family)
 
     def test_deep_geometry_change_bubbles_only_to_its_hierarchy_root(self):

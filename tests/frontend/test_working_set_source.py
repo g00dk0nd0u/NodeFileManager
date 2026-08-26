@@ -93,6 +93,21 @@ class WorkingSetSourceInvariantTest(unittest.TestCase):
         working_set = css[css.index(".working-set{"):css.index(".folder-node{")]
         self.assertNotIn("transition:", working_set)
 
+    def test_working_set_label_is_visual_only_and_states_remain_distinct(self):
+        css = (ROOT / "frontend/css/canvas.css").read_text(encoding="utf-8")
+        self.assertIn('class="working-set-label">Working Set</span>', self.canvas)
+        label = css[css.index(".working-set-label{"):css.index(".folder-node{")]
+        self.assertIn("position:absolute", label)
+        self.assertIn("pointer-events:none", label)
+        self.assertIn(".folder-node.selected", css)
+        self.assertIn(".folder-item.open", css)
+        self.assertIn(".drop-target", css)
+
+    def test_selected_child_marks_only_its_connector_active(self):
+        edges = self.canvas[self.canvas.index("renderEdges()") : self.canvas.index("\n\n  isolate(")]
+        self.assertIn('path.classList.toggle("active",child.panelInstanceId===this.selected)', edges)
+        self.assertIn("#edges path.active", (ROOT / "frontend/css/canvas.css").read_text(encoding="utf-8"))
+
     def test_local_search_is_absolutely_anchored_to_its_panel(self):
         app = (ROOT / "frontend/js/app.js").read_text(encoding="utf-8")
         local = app[app.index("canvas.actions.localSearch"):app.index("function workspaceSearch")]

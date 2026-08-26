@@ -128,7 +128,7 @@ export class FolderCanvas {
   renderSets() {
     for (const [id, element] of this.setElements) if (!this.workingSets.has(id) || ![...this.nodes.values()].some((n) => n.workingSetId === id)) { element.remove(); this.setElements.delete(id); }
     for (const [id, set] of this.workingSets) { const members = [...this.nodes.values()].filter((n) => n.workingSetId === id); if (!members.length) continue;
-      let el = this.setElements.get(id); if (!el) { el = document.createElement("section"); el.className = "working-set"; el.dataset.setId=id; el.addEventListener("pointerdown",event=>this.startSetDrag(event,id)); this.world.prepend(el); this.setElements.set(id, el); }
+      let el = this.setElements.get(id); if (!el) { el = document.createElement("section"); el.className = "working-set"; el.dataset.setId=id;el.innerHTML='<span class="working-set-label">Working Set</span>'; el.addEventListener("pointerdown",event=>this.startSetDrag(event,id)); this.world.prepend(el); this.setElements.set(id, el); }
       const minX = Math.min(...members.map(n => n.x)) - 42, minY = Math.min(...members.map(n => n.y)) - 58, maxX = Math.max(...members.map(n => n.x + n.renderedWidth)) + 42, maxY = Math.max(...members.map(n => n.y + n.renderedHeight)) + 42;
       const style=this.dragSession?.type==="panel"&&this.dragSession.sourceSetId===id?this.dragSession.frozenStyle:{ transform: `translate(${minX}px,${minY}px)`, width: `${maxX-minX}px`, height: `${maxY-minY}px` }; Object.assign(el.style,style); }
   }
@@ -149,7 +149,7 @@ export class FolderCanvas {
       let points;
       if(trail){const exit={x:Math.min(target.x-18,Math.max(source.x+18,parentRight+18)),y:source.y},approach={x:target.x-18,y:target.y},middle=(exit.x+approach.x)/2;points=[source,exit,{x:middle,y:exit.y},{x:middle,y:approach.y},approach,target];}
       else{const shelfTop=Math.min(...this.directChildren(parent.panelInstanceId).map(node=>node.y)),parentBottom=parent.y+(parent.renderedHeight||220),railY=(parentBottom+shelfTop)/2,exitX=parentRight+18;points=[source,{x:exitX,y:source.y},{x:exitX,y:railY},{x:target.x,y:railY},{x:target.x,y:target.y-18},target];}
-      const path=document.createElementNS("http://www.w3.org/2000/svg","path");path.setAttribute("d",this.roundedRoute(points));this.edges.append(path);
+      const path=document.createElementNS("http://www.w3.org/2000/svg","path");path.setAttribute("d",this.roundedRoute(points));path.classList.toggle("active",child.panelInstanceId===this.selected);this.edges.append(path);
     }
   }
 
@@ -166,8 +166,8 @@ export class FolderCanvas {
   preview(panelId, file) { const node=this.nodes.get(panelId); if (![".pdf",".jpg",".jpeg",".png"].includes((file.extension||"").toLowerCase())) { if(node?.preview)this.closePreview(panelId); return; } node.preview={...file,page:1}; this.updatePreview(panelId); this.changed(); }
   closePreview(id){const n=this.nodes.get(id);if(!n)return;delete n.preview;this.updatePreview(id);this.changed();} previewPage(id,d){const p=this.nodes.get(id)?.preview;if(!p)return;p.page=Math.max(1,p.page+d);this.updatePreview(id);}
   updatePreview(id){const n=this.nodes.get(id),e=this.elements.get(id);if(n&&e)updatePreviewElement(e,n,this.handlers());} previewResized(id){const n=this.nodes.get(id),e=this.elements.get(id);if(n&&e){n.renderedHeight=e.offsetHeight;this.reflowHierarchy(id);this.updatePositions();this.renderSets();this.renderEdges();}}
-  selectFolder(id){this.clearSelection();this.selected=id;this.elements.get(id)?.classList.add("selected");} selectFile(file,el){this.clearSelection();this.selectedItem=file;el.classList.add("selected");}
-  clearSelection(){this.world.querySelector(".file-item.selected")?.classList.remove("selected");if(this.selected)this.elements.get(this.selected)?.classList.remove("selected");this.selected=null;this.selectedItem=null;}
+  selectFolder(id){this.clearSelection();this.selected=id;this.elements.get(id)?.classList.add("selected");this.renderEdges();} selectFile(file,el){this.clearSelection();this.selectedItem=file;el.classList.add("selected");}
+  clearSelection(){this.world.querySelector(".file-item.selected")?.classList.remove("selected");if(this.selected)this.elements.get(this.selected)?.classList.remove("selected");this.selected=null;this.selectedItem=null;this.renderEdges();}
   updateFavoriteStates() {}
   visibleFolders(){return [...this.nodes.values()];}
   async refresh(folderId=null){const targets=folderId?[...this.nodes.values()].filter(node=>node.folderId===folderId):[...this.nodes.values()].filter(node=>!node.visualParentPanelId);for(const node of targets)await this.refreshBranch(node);for(const node of targets)this.reflowHierarchy(node.panelInstanceId);this.cleanupSets();this.render();this.changed();}

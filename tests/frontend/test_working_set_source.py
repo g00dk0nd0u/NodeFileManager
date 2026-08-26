@@ -153,6 +153,8 @@ class WorkingSetSourceInvariantTest(unittest.TestCase):
         self.assertIn('handlers.parent(node.panelInstanceId)', self.node)
         self.assertIn('e.stopPropagation()', self.node)
         self.assertIn('`親フォルダーを開く: ${parentName}`', self.node)
+        self.assertIn("compact.title=parentName", self.node)
+        self.assertNotIn("compact.title=node.compactParent?.path", self.node)
 
     def test_compact_parent_switches_to_detached_chip_above_search(self):
         css = (ROOT / "frontend/css/canvas.css").read_text(encoding="utf-8")

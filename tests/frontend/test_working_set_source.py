@@ -143,6 +143,25 @@ class WorkingSetSourceInvariantTest(unittest.TestCase):
         self.assertIn("var(--local-search-height,0px)", css)
         self.assertNotIn("205px", css)
 
+    def test_compact_parent_is_an_accessible_upstream_tab(self):
+        css = (ROOT / "frontend/css/canvas.css").read_text(encoding="utf-8")
+        compact_css = css[css.index(".compact-parent{"):css.index(".node-contents{")]
+        self.assertIn('createIcon("up")', self.node)
+        self.assertNotIn("↗", self.node)
+        self.assertNotIn(".compact-parent:after", css)
+        self.assertIn("position:absolute", compact_css)
+        self.assertIn('handlers.parent(node.panelInstanceId)', self.node)
+        self.assertIn('e.stopPropagation()', self.node)
+        self.assertIn('`親フォルダーを開く: ${parentName}`', self.node)
+        self.assertIn("compact.title=parentName", self.node)
+        self.assertNotIn("compact.title=node.compactParent?.path", self.node)
+
+    def test_compact_parent_switches_to_detached_chip_above_search(self):
+        css = (ROOT / "frontend/css/canvas.css").read_text(encoding="utf-8")
+        search_compact = css[css.index(".folder-node.search-active .compact-parent{"):]
+        self.assertIn("bottom:calc(100% + var(--local-search-height,0px) + 10px)", search_compact)
+        self.assertIn("border-radius:7px", search_compact)
+
     def test_mixed_compact_parent_is_loaded_before_family_positioning(self):
         open_parent = self.canvas[self.canvas.index("async openParent"):self.canvas.index("\n  revealPanel")]
         self.assertIn("await this.loadNode(parent)", open_parent)

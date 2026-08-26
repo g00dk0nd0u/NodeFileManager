@@ -117,6 +117,14 @@ class WorkingSetSourceInvariantTest(unittest.TestCase):
         self.assertIn("clearSelection(renderConnectors=true)", selection)
         self.assertIn("if(renderConnectors)this.renderEdges()", selection)
 
+    def test_reveal_and_close_defer_connectors_to_final_render(self):
+        reveal = self.canvas[self.canvas.index("revealPanel(panelId") : self.canvas.index("\n  revealNode")]
+        self.assertIn("this.clearSelection(false); this.selected = panelId; this.render()", reveal)
+        close = self.canvas[self.canvas.index("\n  removeBranch(panelId") : self.canvas.index("\n\n  dropFilesystem")]
+        self.assertIn("removeBranch(panelId,renderConnectors=true)", close)
+        self.assertIn("this.removeBranch(panelId,false)", close)
+        self.assertIn("this.clearSelection(false); this.render()", close)
+
     def test_local_search_is_absolutely_anchored_to_its_panel(self):
         app = (ROOT / "frontend/js/app.js").read_text(encoding="utf-8")
         local = app[app.index("canvas.actions.localSearch"):app.index("function workspaceSearch")]

@@ -108,6 +108,15 @@ class WorkingSetSourceInvariantTest(unittest.TestCase):
         self.assertIn('path.classList.toggle("active",child.panelInstanceId===this.selected)', edges)
         self.assertIn("#edges path.active", (ROOT / "frontend/css/canvas.css").read_text(encoding="utf-8"))
 
+    def test_selection_renders_connectors_only_after_final_state(self):
+        selection = self.canvas[self.canvas.index("\n  selectFolder(id){") : self.canvas.index("\n  updateFavoriteStates")]
+        self.assertIn("selectFolder(id){this.clearSelection(false)", selection)
+        self.assertEqual(selection[selection.index("selectFolder(id)") : selection.index(" selectFile")].count("this.renderEdges()"), 1)
+        self.assertIn("const connectorChanged=Boolean(this.selected)", selection)
+        self.assertIn("if(connectorChanged)this.renderEdges()", selection)
+        self.assertIn("clearSelection(renderConnectors=true)", selection)
+        self.assertIn("if(renderConnectors)this.renderEdges()", selection)
+
     def test_local_search_is_absolutely_anchored_to_its_panel(self):
         app = (ROOT / "frontend/js/app.js").read_text(encoding="utf-8")
         local = app[app.index("canvas.actions.localSearch"):app.index("function workspaceSearch")]

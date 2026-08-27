@@ -95,13 +95,34 @@ class WorkingSetSourceInvariantTest(unittest.TestCase):
 
     def test_working_set_label_is_visual_only_and_states_remain_distinct(self):
         css = (ROOT / "frontend/css/canvas.css").read_text(encoding="utf-8")
-        self.assertIn('class="working-set-label">Working Set</span>', self.canvas)
+        self.assertIn('class="working-set-kind">Working Set</span>', self.canvas)
+        self.assertIn('class="working-set-context"', self.canvas)
         label = css[css.index(".working-set-label{"):css.index(".folder-node{")]
         self.assertIn("position:absolute", label)
         self.assertIn("pointer-events:none", label)
+        self.assertIn("text-overflow:ellipsis", label)
         self.assertIn(".folder-node.selected", css)
         self.assertIn(".folder-item.open", css)
         self.assertIn(".drop-target", css)
+
+    def test_working_set_context_uses_current_materialized_visual_roots(self):
+        sets = self.canvas[self.canvas.index("renderSets()") : self.canvas.index("\n  roundedRoute")]
+        self.assertIn("const roots=members.filter", sets)
+        self.assertIn("this.nodes.get(node.visualParentPanelId)", sets)
+        self.assertIn("!parent||parent.workingSetId!==id", sets)
+        self.assertIn("roots.length===1", sets)
+        self.assertIn("roots[0].name", sets)
+        self.assertIn('"1 root"', sets)
+        self.assertIn("`${roots.length} roots`", sets)
+        self.assertIn('querySelector(".working-set-context").textContent=context', sets)
+        self.assertNotIn("set.name", sets)
+
+    def test_working_set_geometry_and_edges_remain_stable(self):
+        sets = self.canvas[self.canvas.index("renderSets()") : self.canvas.index("\n  roundedRoute")]
+        self.assertIn("Math.min(...members.map(n => n.x)) - 42", sets)
+        self.assertIn("Math.min(...members.map(n => n.y)) - 58", sets)
+        self.assertIn("Math.max(...members.map(n => n.x + n.renderedWidth)) + 42", sets)
+        self.assertIn("Math.max(...members.map(n => n.y + n.renderedHeight)) + 42", sets)
 
     def test_selected_child_marks_only_its_connector_active(self):
         edges = self.canvas[self.canvas.index("renderEdges()") : self.canvas.index("\n\n  isolate(")]

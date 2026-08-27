@@ -127,8 +127,10 @@ export class FolderCanvas {
   }
   renderSets() {
     for (const [id, element] of this.setElements) if (!this.workingSets.has(id) || ![...this.nodes.values()].some((n) => n.workingSetId === id)) { element.remove(); this.setElements.delete(id); }
-    for (const [id, set] of this.workingSets) { const members = [...this.nodes.values()].filter((n) => n.workingSetId === id); if (!members.length) continue;
-      let el = this.setElements.get(id); if (!el) { el = document.createElement("section"); el.className = "working-set"; el.dataset.setId=id;el.innerHTML='<span class="working-set-label">Working Set</span>'; el.addEventListener("pointerdown",event=>this.startSetDrag(event,id)); this.world.prepend(el); this.setElements.set(id, el); }
+    for (const [id] of this.workingSets) { const members = [...this.nodes.values()].filter((n) => n.workingSetId === id); if (!members.length) continue;
+      const roots=members.filter(node=>{const parent=this.nodes.get(node.visualParentPanelId);return!parent||parent.workingSetId!==id;}),context=roots.length===1?(typeof roots[0].name==="string"&&roots[0].name.trim()?roots[0].name:"1 root"):`${roots.length} roots`;
+      let el = this.setElements.get(id); if (!el) { el = document.createElement("section"); el.className = "working-set"; el.dataset.setId=id;el.innerHTML='<div class="working-set-label"><span class="working-set-kind">Working Set</span><span class="working-set-context"></span></div>'; el.addEventListener("pointerdown",event=>this.startSetDrag(event,id)); this.world.prepend(el); this.setElements.set(id, el); }
+      el.querySelector(".working-set-context").textContent=context;
       const minX = Math.min(...members.map(n => n.x)) - 42, minY = Math.min(...members.map(n => n.y)) - 58, maxX = Math.max(...members.map(n => n.x + n.renderedWidth)) + 42, maxY = Math.max(...members.map(n => n.y + n.renderedHeight)) + 42;
       const style=this.dragSession?.type==="panel"&&this.dragSession.sourceSetId===id?this.dragSession.frozenStyle:{ transform: `translate(${minX}px,${minY}px)`, width: `${maxX-minX}px`, height: `${maxY-minY}px` }; Object.assign(el.style,style); }
   }

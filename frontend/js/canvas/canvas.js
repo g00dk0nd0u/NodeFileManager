@@ -1,6 +1,7 @@
 import { createNodeElement, updateNodeElement, updatePreviewElement } from "./node.js";
 import { applyViewport } from "./viewport.js";
 import { BRANCH_SPACING, panelWidth } from "./layout.js";
+import { shelfRoute, trailRoute } from "./edge-routing.js";
 
 const uid = (prefix) => `${prefix}-${crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`}`;
 
@@ -122,7 +123,10 @@ export class FolderCanvas {
     const changedBranches=new Set();
     for (const [id, node] of this.nodes) { let element = this.elements.get(id); if (!element) { element = createNodeElement(node, this.handlers()); this.elements.set(id, element); this.world.append(element); }
       const previousWidth=node.renderedWidth,previousHeight=node.renderedHeight;element.style.width=`${panelWidth(node)}px`;updateNodeElement(element, node, id === this.selected, this.selectedItem?.id, new Set(this.directChildren(id).map((child) => child.folderId)), this.handlers());node.renderedWidth=element.offsetWidth;node.renderedHeight=element.offsetHeight;if(previousWidth!==node.renderedWidth||previousHeight!==node.renderedHeight)changedBranches.add(id); }
-    for(const panelId of changedBranches)this.reflowHierarchy(panelId);if(changedBranches.size)this.updatePositions();
+    for(const panelId of changedBranches)this.reflowHierarchy(panelId);
+    // Topology changes can reflow panels without changing their dimensions. Always
+    // synchronize transforms before renderEdges reads live row/header rectangles.
+    this.updatePositions();
     this.renderSets();this.renderEdges(); document.querySelector("#empty-hint").hidden = this.nodes.size > 0;
   }
   renderSets() {
@@ -142,6 +146,11 @@ export class FolderCanvas {
   }
   renderEdges() {
     this.edges.replaceChildren();const canvasRect=this.canvas.getBoundingClientRect();
+    const shelfOrder=new Map();
+    for(const parent of this.nodes.values()){
+      const children=this.directChildren(parent.panelInstanceId);
+      if(children.length>1)children.sort((a,b)=>a.x-b.x||a.y-b.y||a.panelInstanceId.localeCompare(b.panelInstanceId)).forEach((child,index)=>shelfOrder.set(child.panelInstanceId,{index,count:children.length}));
+    }
     for(const child of this.nodes.values()){
       const parent=this.nodes.get(child.visualParentPanelId);if(!parent)continue;
       const parentElement=this.elements.get(parent.panelInstanceId),childElement=this.elements.get(child.panelInstanceId),sourceRow=parentElement?.querySelector(`.folder-item[data-id="${CSS.escape(child.folderId)}"]`),header=childElement?.querySelector(".node-title");if(!sourceRow||!header)continue;
@@ -149,8 +158,8 @@ export class FolderCanvas {
       const from={x:rowRect.right,y:rowRect.top+rowRect.height/2},to=trail?{x:headerRect.left,y:headerRect.top+headerRect.height/2}:{x:headerRect.left+headerRect.width/2,y:headerRect.top};
       const source=this.screenToWorld(from.x-canvasRect.left,from.y-canvasRect.top),target=this.screenToWorld(to.x-canvasRect.left,to.y-canvasRect.top),parentRight=this.screenToWorld(parentRect.right-canvasRect.left,0).x;
       let points;
-      if(trail){const exit={x:Math.min(target.x-18,Math.max(source.x+18,parentRight+18)),y:source.y},approach={x:target.x-18,y:target.y},middle=(exit.x+approach.x)/2;points=[source,exit,{x:middle,y:exit.y},{x:middle,y:approach.y},approach,target];}
-      else{const shelfTop=Math.min(...this.directChildren(parent.panelInstanceId).map(node=>node.y)),parentBottom=parent.y+(parent.renderedHeight||220),railY=(parentBottom+shelfTop)/2,exitX=parentRight+18;points=[source,{x:exitX,y:source.y},{x:exitX,y:railY},{x:target.x,y:railY},{x:target.x,y:target.y-18},target];}
+      if(trail)points=trailRoute(source,target,parentRight);
+      else{const shelfTop=Math.min(...this.directChildren(parent.panelInstanceId).map(node=>node.y)),parentBottom=parent.y+(parent.renderedHeight||220),lane=shelfOrder.get(child.panelInstanceId);points=shelfRoute(source,target,parentRight,parentBottom,shelfTop,lane.index,lane.count);}
       const path=document.createElementNS("http://www.w3.org/2000/svg","path");path.setAttribute("d",this.roundedRoute(points));path.classList.toggle("active",child.panelInstanceId===this.selected);this.edges.append(path);
     }
   }
@@ -187,7 +196,7 @@ export class FolderCanvas {
     if(destination&&[...this.nodes.values()].some(n=>n.workingSetId===destination[0]&&n.folderId===root.fsParentFolderId))return{type:"reattach",setId:destination[0]};const r=session.frozenRect;if(root.visualParentPanelId&&(x<r.left||x>r.right||y<r.top||y>r.bottom))return{type:"isolate"};return null;}
   continueDrag(event){const s=this.dragSession;if(!s||s.pointerId!==event.pointerId)return;const dx=event.clientX-s.startX,dy=event.clientY-s.startY;if(!s.dragging&&Math.hypot(dx,dy)<5)return;if(!s.dragging&&s.type==="panel")this.selectFolder(s.nodeId);s.dragging=true;if(s.type==="set")for(const[id,o]of s.origins){const n=this.nodes.get(id);if(n){n.x=o.x+dx/this.viewport.zoom;n.y=o.y+dy/this.viewport.zoom;}}if(s.type==="panel"){s.intent=this.dragIntent(s,event.clientX,event.clientY);this.canvas.dataset.dragIntent=s.intent?.type||"return";this.renderFilesystemFeedback(s.intent);}this.updatePositions();this.renderSets();this.renderEdges();}
   endDrag(event){const s=this.dragSession;if(!s||s.pointerId!==event.pointerId)return;const intent=this.dragIntent(s,event.clientX,event.clientY),moved=s.dragging,id=s.nodeId;if(!moved){this.finishDrag(true);if(id)this.selectFolder(id);return;}if(s.type==="set"){this.finishDrag(true);return;}if(intent?.type==="filesystem"){const folderId=this.nodes.get(id).folderId;this.finishDrag(false);this.actions.transfer?.(folderId,intent.destinationId,false,"folder");return;}this.finishDrag(Boolean(intent));if(intent?.type==="isolate")this.isolate(id);else if(intent?.type==="reattach")this.reattach(id,intent.setId);}
-  renderFilesystemFeedback(intent){this.clearFilesystemFeedback();if(intent?.type!=="filesystem"||!intent.targetElement||!intent.destinationName)return;const label=document.createElement("span");label.className="filesystem-move-label";label.textContent=`MOVE \u2192 ${intent.destinationName}`;intent.targetElement.classList.add("filesystem-move-target",`filesystem-move-target--${intent.destinationTarget}`);intent.targetElement.append(label);this.filesystemFeedback={element:intent.targetElement,label};}
+  renderFilesystemFeedback(intent){if(intent?.type!=="filesystem"||!intent.targetElement||!intent.destinationName){this.clearFilesystemFeedback();return;}const current=this.filesystemFeedback;if(current&&current.element===intent.targetElement&&current.destinationId===intent.destinationId&&current.destinationTarget===intent.destinationTarget&&current.destinationName===intent.destinationName)return;this.clearFilesystemFeedback();const label=document.createElement("span");label.className="filesystem-move-label";label.textContent=`MOVE \u2192 ${intent.destinationName}`;intent.targetElement.classList.add("filesystem-move-target",`filesystem-move-target--${intent.destinationTarget}`);intent.targetElement.append(label);this.filesystemFeedback={element:intent.targetElement,label,destinationId:intent.destinationId,destinationTarget:intent.destinationTarget,destinationName:intent.destinationName};}
   clearFilesystemFeedback(){const feedback=this.filesystemFeedback;if(!feedback)return;feedback.label.remove();feedback.element.classList.remove("filesystem-move-target","filesystem-move-target--panel-region","filesystem-move-target--child-row");this.filesystemFeedback=null;}
   cancelDrag(event){if(this.dragSession?.pointerId===event.pointerId)this.finishDrag(false);} finishDrag(save){const s=this.dragSession;this.clearFilesystemFeedback();delete this.canvas.dataset.dragIntent;if(!s)return;this.dragSession=null;if(s.element.hasPointerCapture?.(s.pointerId))s.element.releasePointerCapture(s.pointerId);if(save&&s.dragging)this.changed();else if(s.dragging){for(const[id,o]of s.origins){const n=this.nodes.get(id);if(n)Object.assign(n,o);}this.updatePositions();this.renderSets();this.renderEdges();}}
   updatePositions(){for(const[id,el]of this.elements){const n=this.nodes.get(id);if(n)el.style.transform=`translate(${n.x}px,${n.y}px)`;}} updateViewport(){applyViewport(this.world,this.canvas.querySelector("#edges"),this.viewport);}

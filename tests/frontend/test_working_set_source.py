@@ -197,7 +197,7 @@ class WorkingSetSourceInvariantTest(unittest.TestCase):
         self.assertIn("previousWidth!==node.renderedWidth", render)
         self.assertIn("changedBranches.add(id)", render)
         self.assertIn("this.reflowHierarchy(panelId)", render)
-        self.assertIn("if(changedBranches.size)this.updatePositions()", render)
+        self.assertIn("this.updatePositions()", render)
 
     def test_sibling_width_transition_reflows_its_shelf(self):
         render = self.canvas[self.canvas.index("\n  render()") : self.canvas.index("\n  renderSets()")]

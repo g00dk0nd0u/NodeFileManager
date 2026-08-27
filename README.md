@@ -1,6 +1,6 @@
 # NodeFileManager
 
-NodeFileManager は、実フォルダーを自由配置できるノードとして閲覧する Windows 向けローカルアプリです。Blender Node Editor の暗い、広い、直接操作できるワークスペースを参考にしつつ、ファイル管理に不要なソケット等は持ちません。
+NodeFileManager は、実フォルダーを Folder Panel として空間的に扱う Windows / macOS 向けローカルアプリです。Blender Node Editor の暗い広いキャンバスと直接操作感を参考にしつつ、目的はノード編集ではなく **「今使うフォルダーだけを机の上に出しておく persistent spatial workspace」** です。
 
 ## HOW TO START NODEFILEMANAGER / 起動方法
 
@@ -17,23 +17,69 @@ standalone では toolbar の **Quit** が所有中の localhost server を安�
 
 Python 3.10 以降（3.14 推奨）で `python -m backend.launcher` を実行します。ブラウザー不要の診断は `python -m backend.launcher --no-browser`、従来の server-only 起動は `python -m backend.server` です。通常 UI はアプリ内 folder browser を使うため `tkinter` は必須ではありません。旧 Tk picker だけが隔離された fallback として残っています。
 
-## 使い方
+## 現在の操作モデル
 
-1. **Select Folder** を押し、アプリ内ダイアログでフォルダーを移動して **Select This Folder** を押します。
-2. 新しいノードは直下のフォルダー行とファイル行を開いた状態で表示します。フォルダー行を押すと、そのフォルダーだけを次のノードとして開閉します。
-3. ファイルはダブルクリックで開き、Rename で名前変更できます。別の表示中フォルダーノードへのドラッグは移動、Alt/Option+ドラッグはコピーです。
-4. OS 側の変更は **Refresh** で再読み込みします。
-5. ノードをドラッグして移動します。背景ドラッグでパン、ホイールでズームします。
-6. 配置、展開状態、パン、ズームは自動保存され、次回起動時に現在のファイルシステムから復元されます。
+### フォルダーをワークスペースへ追加
+
+空のキャンバスを右クリックし **Select Folder** を選び、アプリ内 folder browser から実フォルダーを選択します。追加したフォルダーは新しい **Working Set** の root Folder Panel になります。
+
+### Folder Panel と階層
+
+- フォルダー行をクリックすると、そのフォルダーが別の Folder Panel として materialize されます。
+- 同じ親から direct child が1つなら右方向の **Trail**、複数なら親の下に **Shelf** として自動配置します。
+- connector は親 Folder Panel 内の該当フォルダー行から子 Folder Panel へ接続します。
+- 開いているフォルダー行は open 状態として表示されます。
+- Folder Panel 右上の **×** は、その Panel と descendants をまとめて閉じます。
+- 実親が表示されていない root Panel には **Compact Parent** が上流タブとして表示され、クリックすると実親を同じ Working Set 内へ materialize します。
+
+階層内の Folder Panel 配置は自動です。通常の Folder Panel を自由配置するモデルではありません。Working Set 自体はひとつのグループとして移動できます。
+
+### Working Set
+
+Working Set は関連する Folder Panel 群をひとつの作業単位として囲います。ラベルは `WORKING SET` と現在の visual root context を表示します。単一 root なら root Folder名、複数 root がある場合は `N roots` と表示します。
+
+### Isolate / Reattach
+
+- Panel の右クリックメニューから **Isolate** を実行すると、その branch を descendants ごと別 Working Set に分離します。
+- 親が別 Working Set に存在する isolated branch は、その親を持つ Working Set へドラッグすることで **Reattach** できます。
+- Isolate / Reattach は filesystem のフォルダーパスを変更しません。表示上の Working Set / visual hierarchy の操作です。
+
+### 実ファイル / 実フォルダーの Move
+
+NodeFileManager には **表示上の navigation** と **実 filesystem mutation** の両方があります。混同しないでください。
+
+- ファイル行を別 Folder Panel の file region へドラッグすると、その実ファイルを移動します。
+- Alt / Option を押しながらファイルをドロップするとコピーします。
+- Folder Panel を別 Folder Panel の folder region / folder row へドラッグすると、その実フォルダーを移動します。
+- filesystem Move 後は表示中の identity / hierarchy を再調整します。
+
+変異操作の検証は必ず disposable なテストフォルダーで行ってください。
+
+### 検索
+
+- 各 Folder Panel の検索ボタンから、そのフォルダー以下を recursive search できます。検索入力欄と結果カードは対象 Panel の上に一時表示されます。
+- 空のキャンバスを右クリックして **Search Workspace** を選ぶか、`Ctrl+K` / `Cmd+K` で、現在 materialize されている workspace 内を検索できます。
+- 検索結果を選択すると該当 Panel / 行へ移動します。
+
+### その他
+
+- ファイルはダブルクリックで既定アプリから開きます。
+- JPG / PNG / PDF は Panel 下部で preview できます。
+- **Rename** で選択中の file / folder を rename できます。
+- **Refresh** は表示中 filesystem state を再読み込みします。
+- 背景ドラッグで pan、ホイールで zoom します。
+- Working Set、展開状態、viewport は自動保存され、再起動時に現在の filesystem と照合して復元されます。
 
 ## アーキテクチャと永続化
 
-- `frontend/`: HTML/CSS、ネイティブ ES Modules。接続されたフォルダーパネル、Kanban列、previewを描画
-- `backend/filesystem/`: ネイティブ選択ダイアログ、許可ルート、一覧、open、名前変更／コピー／移動
+- `frontend/`: HTML/CSS、ネイティブ ES Modules。Folder Panel、Working Set、Trail/Shelf、connector、search、preview、drag interaction を描画
+- `backend/filesystem/`: 許可ルート、folder browser、一覧、検索、open、名前変更／コピー／移動
 - `backend/workspace/`: UI 状態をローカル JSON に原子的に保存
 - `backend/server.py`: Python 標準ライブラリだけの localhost HTTP API と静的配信
 
-Windows では `%LOCALAPPDATA%\NodeFileManager\workspace.json`、macOS/その他では従来どおり `~/.nodefilemanager/workspace.json` を使います。log はそれぞれ同じ user-data directory の `logs/NodeFileManager.log`（rotating、最大 1 MB × 4 世代）です。アプリ本体や `.app` 内には書き込みません。JSON は表示状態だけを保存し、ファイル一覧は毎回ディスクから取得します。詳細は [architecture.md](docs/architecture.md) を参照してください。
+Windows では `%LOCALAPPDATA%\NodeFileManager\workspace.json`、macOS/その他では `~/.nodefilemanager/workspace.json` を使います。log はそれぞれ同じ user-data directory の `logs/NodeFileManager.log`（rotating、最大 1 MB × 4 世代）です。アプリ本体や `.app` 内には書き込みません。JSON は表示状態だけを保存し、ファイル一覧は毎回ディスクから取得します。詳細は [architecture.md](docs/architecture.md) を参照してください。
+
+AI / design review 用の製品コンテキストと invariants はルートの [`CLAUDE.md`](CLAUDE.md) にまとめています。
 
 ## Standalone test build
 
@@ -50,48 +96,33 @@ GitHub Actions の **Standalone test builds** は Windows x64 / macOS x64 で te
 
 1. 対象 OS の x64 ZIP を repository Python 環境外へ展開します。
 2. Windows は `NodeFileManager.exe`、macOS は `NodeFileManager.app` をダブルクリックします。
-3. browser が開き、health 表示が `packaged` であること、Select Folder、一覧、move、JPG/PNG/PDF preview を disposable folder で確認します。
-4. **Quit** を押し、port 8000 が解放されることを確認します。再起動し workspace が復元されることを確認します。
+3. browser が開き、health 表示が `packaged` であることを確認します。
+4. disposable folder を使って Select Folder、Trail/Shelf展開、Compact Parent、Isolate/Reattach、local search / workspace search、Move、JPG/PNG/PDF preview を確認します。
+5. **Quit** を押し、port 8000 が解放されることを確認します。
+6. 再起動し Working Set / materialized hierarchy / viewport が復元されることを確認します。
 
 ## 社内 Windows PC での手動確認
 
-変異操作は必ず disposable なローカルテストフォルダーで実施してください。複数の子フォルダー、PDF、画像、テキスト／文書ファイルを用意し、展開、ファイルを開く、名前変更、コピー、Move、別ノードへのドラッグ移動（Alt でコピー）を順に確認します。OS 側でファイルを作成／削除して **Refresh** 後に表示が一致すること、終了・再起動後に配置と展開が戻りつつファイル一覧は現在のディスク内容になることも確認します。
+変異操作は必ず disposable なローカルテストフォルダーで実施してください。複数の子フォルダー、PDF、画像、テキスト／文書ファイルを用意し、展開、ファイルを開く、名前変更、コピー、Move、検索を順に確認します。OS 側でファイルを作成／削除して **Refresh** 後に表示が一致すること、終了・再起動後に Working Set と materialized hierarchy が戻りつつファイル一覧は現在のディスク内容になることも確認します。
 
 社内 PC では Defender/EDR の警告、ネットワークドライブ、OneDrive/SharePoint のポリシー差を記録し、同期領域での変異テストはローカル確認後だけ行ってください。
 
 1. Python 3.14 を導入します（通常起動に tkinter は不要です）。
 2. `scripts\start.cmd` をダブルクリックし、ブラウザーが自動表示されることを確認します。
-3. **Select Folder** で子フォルダーを持つ実フォルダーを選択します。
-4. 親子パネルの接続、group移動、背景パン、ホイールズームを順に確認します。
-5. `Ctrl+C` で終了し、再度 `start.cmd` を実行してルート、展開、位置、パン、ズームが戻ることを確認します。
-6. 選択済みフォルダーを一時的に移動して再起動し、画面が停止せず復元不能件数を表示することを確認します。
+3. 空キャンバス右クリック → **Select Folder** でテストフォルダーを追加します。
+4. Trail / Shelf、connector、Working Set、Compact Parent を確認します。
+5. Isolate / Reattach と filesystem Move が別の結果になることを disposable folder で確認します。
+6. local search / Search Workspace を確認します。
+7. `Ctrl+C` で終了し、再度 `start.cmd` を実行して Working Set、materialized hierarchy、pan、zoom が戻ることを確認します。
+8. 選択済みフォルダーを一時的に移動して再起動し、画面が停止せず復元不能状態を処理できることを確認します。
 
-旧Tk pickerはfallbackコードとして残っていますが、通常UIからは呼び出しません。アプリ内pickerの回帰確認では、次も実施します。
-
-- `py -3.14 -m tkinter` が動作することを確認します。
-- **Select Folder** がアプリ内dialogを即座に開き、選択、Escape、backdrop、Cancelを繰り返しても使い続けられることを確認します。
-- 余分なコンソールウィンドウが表示されないことを確認します（Windows の子プロセスには `CREATE_NO_WINDOW` を使用します）。
-- 権限が許す範囲で UNC、ネットワーク、OneDrive、SharePoint 同期フォルダーを選択します。
-- picker を開いたまま <http://127.0.0.1:8000/api/health> が応答することを確認します。
+旧Tk pickerはfallbackコードとして残っていますが、通常UIからは呼び出しません。
 
 ## macOS source 手動確認
 
 repository を空白を含む path に置き、Finder で `scripts/NodeFileManager.command` をダブルクリックします。health 成功後だけ browser が開くこと、上記 disposable フォルダーの一連の手順と、Finder の既定アプリで PDF、画像、文書が開くことを確認します。
 
-1. NodeFileManager を起動します。
-2. **Select Folder** を押します。
-3. キャンセルします。
-4. 再度 **Select Folder** を押します。
-5. 実フォルダーを選択します。
-6. ルートノードが表示されることを確認します。
-7. **Select Folder** を少なくとも 5 回繰り返します。
-8. picker を開いたまま <http://127.0.0.1:8000/api/health> が応答することを確認します。
-9. 複数の方法で picker を閉じる、またはキャンセルします。
-10. どの場合も NodeFileManager を引き続き利用できることを確認します。
-
-続けて **Select Folder → Node → Expand → Edges → Drag → Pan/Zoom → Close → Restart → Restore** の一連の操作を再確認します。
-
-回帰確認では、空の背景をドラッグすると viewport だけが動き、folder panelの操作ではpanしないことを確認します。また、open child panelを保存して終了した後、外部で子フォルダーを削除・追加し、再起動またはRefresh時に現在の階層と一致することを確認します。PDF previewはbrowser native rendererと`#page=N`を使うため、page fragmentの挙動はSafari/Edgeの内蔵PDF viewerに依存し、総page数は表示しません。
+回帰確認では、空の背景をドラッグすると viewport だけが動き、Folder Panel / Working Set操作では pan しないことを確認します。また、open child panelを保存して終了した後、外部で子フォルダーを削除・追加し、再起動またはRefresh時に現在の階層と一致することを確認します。PDF previewはbrowser native rendererと`#page=N`を使うため、page fragmentの挙動はSafari/Edgeの内蔵PDF viewerに依存し、総page数は表示しません。
 
 ## Launcher の port 判定
 
@@ -101,4 +132,11 @@ repository を空白を含む path に置き、Finder で `scripts/NodeFileManag
 
 ## 既知の制限
 
-ファイル監視、検索、undo/redo、複数タブ、高度な自動配置は未実装です。削除は標準ライブラリだけで各 OS のごみ箱へ確実に送る共通手段がないため、永久削除を避けて延期しています。旧 Tk fallback picker は Tk がない環境では使えませんが、通常のアプリ内 picker には影響しません。巨大ディレクトリの性能は未調整です。
+- undo / redo は未実装です。
+- 複数タブは未実装です。
+- filesystem watcher は未実装ですが、window focus / visibility復帰時と **Refresh** で再読込します。
+- Trail / Shelf による hierarchy 自動配置は実装済みですが、非常に深い階層や大量 sibling 向けの折返し・高度なpackingは未調整です。
+- 大規模ディレクトリ / 多数Panel時の性能は未調整です。
+- filesystem Move / Copy は実データを変更するため、現時点では disposable folder で十分に検証してください。
+- 削除は標準ライブラリだけで各 OS のごみ箱へ確実に送る共通手段がないため、永久削除を避けて延期しています。
+- 旧 Tk fallback picker は Tk がない環境では使えませんが、通常のアプリ内 picker には影響しません。

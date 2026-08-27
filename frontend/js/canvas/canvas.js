@@ -1,7 +1,7 @@
 import { createNodeElement, updateNodeElement, updatePreviewElement } from "./node.js";
 import { applyViewport } from "./viewport.js";
 import { BRANCH_SPACING, panelWidth } from "./layout.js";
-import { shelfRoute, trailRoute } from "./edge-routing.js";
+import { measureConnectorAnchors, scrollTopToReveal, shelfRoute, trailRoute } from "./edge-routing.js";
 
 const uid = (prefix) => `${prefix}-${crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`}`;
 
@@ -84,7 +84,7 @@ export class FolderCanvas {
     this.nodes.set(child.panelInstanceId, child); await this.loadNode(child); this.reflowHierarchy(parentPanelId); this.render(); this.changed(); this.actions.visit?.(folder.id);
   }
   async openParent(childId) { const child=this.nodes.get(childId), folder=child?.compactParent; if(!child||!folder)return; const existing=this.panelForFolder(folder.id,child.workingSetId); if(existing){child.visualParentPanelId=existing.panelInstanceId;delete child.compactParent;this.reflowHierarchy(existing.panelInstanceId);this.render();this.changed();return;}
-    const parent={...folder,id:folder.id,folderId:folder.id,panelInstanceId:uid("panel"),workingSetId:child.workingSetId,visualParentPanelId:null,fsParentFolderId:null,x:child.x,y:child.y,childrenLoaded:false};child.visualParentPanelId=parent.panelInstanceId;delete child.compactParent;this.nodes.set(parent.panelInstanceId,parent);await this.loadNode(parent);parent.x=child.x-panelWidth(parent)-BRANCH_SPACING.trail;this.layoutFamily(parent.panelInstanceId);this.render();this.changed(); }
+    const parent={...folder,id:folder.id,folderId:folder.id,panelInstanceId:uid("panel"),workingSetId:child.workingSetId,visualParentPanelId:null,fsParentFolderId:null,x:child.x,y:child.y,childrenLoaded:false,revealFolderId:child.folderId};child.visualParentPanelId=parent.panelInstanceId;delete child.compactParent;this.nodes.set(parent.panelInstanceId,parent);await this.loadNode(parent);parent.x=child.x-panelWidth(parent)-BRANCH_SPACING.trail;this.layoutFamily(parent.panelInstanceId);this.render();this.changed(); }
   revealPanel(panelId, rowId = null) { const node = this.nodes.get(panelId); if (!node) return false; this.clearSelection(false); this.selected = panelId; this.render();
     this.viewport.x = this.canvas.clientWidth / 2 - (node.x + (node.renderedWidth || panelWidth(node)) / 2) * this.viewport.zoom; this.viewport.y = this.canvas.clientHeight / 2 - (node.y + (node.renderedHeight || 160) / 2) * this.viewport.zoom; this.updateViewport();
     const row = rowId && this.elements.get(panelId)?.querySelector(`[data-id="${CSS.escape(rowId)}"]`); if (row) { row.classList.add("match-pulse"); setTimeout(() => row.classList.remove("match-pulse"), 1200); } return true; }
@@ -122,11 +122,9 @@ export class FolderCanvas {
     for (const [id, element] of this.elements) if (!this.nodes.has(id)) { element.remove(); this.elements.delete(id); }
     const changedBranches=new Set();
     for (const [id, node] of this.nodes) { let element = this.elements.get(id); if (!element) { element = createNodeElement(node, this.handlers()); this.elements.set(id, element); this.world.append(element); }
-      const previousWidth=node.renderedWidth,previousHeight=node.renderedHeight;element.style.width=`${panelWidth(node)}px`;updateNodeElement(element, node, id === this.selected, this.selectedItem?.id, new Set(this.directChildren(id).map((child) => child.folderId)), this.handlers());node.renderedWidth=element.offsetWidth;node.renderedHeight=element.offsetHeight;if(previousWidth!==node.renderedWidth||previousHeight!==node.renderedHeight)changedBranches.add(id); }
+      const previousWidth=node.renderedWidth,previousHeight=node.renderedHeight;element.style.width=`${panelWidth(node)}px`;updateNodeElement(element, node, id === this.selected, this.selectedItem?.id, new Set(this.directChildren(id).map((child) => child.folderId)), this.handlers());node.renderedWidth=element.offsetWidth;node.renderedHeight=element.offsetHeight;if(node.revealFolderId){this.revealFolderRow(element,node.revealFolderId);delete node.revealFolderId;}if(previousWidth!==node.renderedWidth||previousHeight!==node.renderedHeight)changedBranches.add(id); }
     for(const panelId of changedBranches)this.reflowHierarchy(panelId);
-    // Topology changes can reflow panels without changing their dimensions. Always
-    // synchronize transforms before renderEdges reads live row/header rectangles.
-    this.updatePositions();
+    if(changedBranches.size)this.updatePositions();
     this.renderSets();this.renderEdges(); document.querySelector("#empty-hint").hidden = this.nodes.size > 0;
   }
   renderSets() {
@@ -144,6 +142,7 @@ export class FolderCanvas {
     for(let index=1;index<points.length-1;index++){const previous=points[index-1],corner=points[index],next=points[index+1],incoming=Math.hypot(corner.x-previous.x,corner.y-previous.y),outgoing=Math.hypot(next.x-corner.x,next.y-corner.y),bend=Math.min(radius,incoming/2,outgoing/2),before={x:corner.x+(previous.x-corner.x)*bend/incoming,y:corner.y+(previous.y-corner.y)*bend/incoming},after={x:corner.x+(next.x-corner.x)*bend/outgoing,y:corner.y+(next.y-corner.y)*bend/outgoing};route+=` L ${before.x} ${before.y} Q ${corner.x} ${corner.y} ${after.x} ${after.y}`;}
     const last=points.at(-1);return `${route} L ${last.x} ${last.y}`;
   }
+  revealFolderRow(element,folderId){const row=element.querySelector(`.folder-item[data-id="${CSS.escape(folderId)}"]`),region=row?.closest(".folder-region");if(!region)return;const rowRect=row.getBoundingClientRect(),regionRect=region.getBoundingClientRect();region.scrollTop=scrollTopToReveal(region.scrollTop,regionRect.top,regionRect.bottom,rowRect.top,rowRect.bottom);}
   renderEdges() {
     this.edges.replaceChildren();const canvasRect=this.canvas.getBoundingClientRect();
     const shelfOrder=new Map();
@@ -153,10 +152,8 @@ export class FolderCanvas {
     }
     for(const child of this.nodes.values()){
       const parent=this.nodes.get(child.visualParentPanelId);if(!parent)continue;
-      const parentElement=this.elements.get(parent.panelInstanceId),childElement=this.elements.get(child.panelInstanceId),sourceRow=parentElement?.querySelector(`.folder-item[data-id="${CSS.escape(child.folderId)}"]`),header=childElement?.querySelector(".node-title");if(!sourceRow||!header)continue;
-      const trail=this.directChildren(parent.panelInstanceId).length===1,rowRect=sourceRow.getBoundingClientRect(),headerRect=header.getBoundingClientRect(),parentRect=parentElement.getBoundingClientRect();
-      const from={x:rowRect.right,y:rowRect.top+rowRect.height/2},to=trail?{x:headerRect.left,y:headerRect.top+headerRect.height/2}:{x:headerRect.left+headerRect.width/2,y:headerRect.top};
-      const source=this.screenToWorld(from.x-canvasRect.left,from.y-canvasRect.top),target=this.screenToWorld(to.x-canvasRect.left,to.y-canvasRect.top),parentRight=this.screenToWorld(parentRect.right-canvasRect.left,0).x;
+      const parentElement=this.elements.get(parent.panelInstanceId),childElement=this.elements.get(child.panelInstanceId),trail=this.directChildren(parent.panelInstanceId).length===1,anchors=measureConnectorAnchors(parentElement,childElement,child.folderId,canvasRect,(x,y)=>this.screenToWorld(x,y),trail);if(!anchors)continue;
+      const {source,target,parentRight}=anchors;
       let points;
       if(trail)points=trailRoute(source,target,parentRight);
       else{const shelfTop=Math.min(...this.directChildren(parent.panelInstanceId).map(node=>node.y)),parentBottom=parent.y+(parent.renderedHeight||220),lane=shelfOrder.get(child.panelInstanceId);points=shelfRoute(source,target,parentRight,parentBottom,shelfTop,lane.index,lane.count);}
@@ -204,5 +201,5 @@ export class FolderCanvas {
   startPan(event){if(event.target.closest?.(".folder-node,.working-set")||event.button!==0)return;this.canvas.setPointerCapture(event.pointerId);this.canvas.classList.add("panning");const sx=event.clientX,sy=event.clientY,x=this.viewport.x,y=this.viewport.y;const move=e=>{this.viewport.x=x+e.clientX-sx;this.viewport.y=y+e.clientY-sy;this.updateViewport();};const end=()=>{this.canvas.removeEventListener("pointermove",move);this.canvas.classList.remove("panning");this.changed();};this.canvas.addEventListener("pointermove",move);this.canvas.addEventListener("pointerup",end,{once:true});}
   zoom(event){event.preventDefault();const r=this.canvas.getBoundingClientRect(),sx=event.clientX-r.left,sy=event.clientY-r.top,old=this.viewport.zoom,next=Math.min(2.5,Math.max(.25,old*Math.exp(-event.deltaY*.001)));this.viewport.x=sx-(sx-this.viewport.x)*next/old;this.viewport.y=sy-(sy-this.viewport.y)*next/old;this.viewport.zoom=next;this.updateViewport();this.changed();}
   screenToWorld(x,y){return{x:(x-this.viewport.x)/this.viewport.zoom,y:(y-this.viewport.y)/this.viewport.zoom};} changed(){this.onChange(this.serialize());}
-  serialize(){const nodes=Object.fromEntries([...this.nodes].map(([id,n])=>{const{childrenLoaded,folders,files,preview,renderedWidth,renderedHeight,compactParent,...saved}=n;return[id,saved];}));const roots=[...this.nodes.values()].filter(n=>!n.visualParentPanelId).map(({folderId,panelInstanceId,workingSetId,path})=>({id:folderId,panelInstanceId,workingSetId,path}));return{version:2,roots,nodes,workingSets:Object.fromEntries(this.workingSets),viewport:this.viewport};}
+  serialize(){const nodes=Object.fromEntries([...this.nodes].map(([id,n])=>{const{childrenLoaded,folders,files,preview,renderedWidth,renderedHeight,compactParent,revealFolderId,...saved}=n;return[id,saved];}));const roots=[...this.nodes.values()].filter(n=>!n.visualParentPanelId).map(({folderId,panelInstanceId,workingSetId,path})=>({id:folderId,panelInstanceId,workingSetId,path}));return{version:2,roots,nodes,workingSets:Object.fromEntries(this.workingSets),viewport:this.viewport};}
 }

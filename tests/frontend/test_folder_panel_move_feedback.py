@@ -38,7 +38,11 @@ class FolderPanelMoveFeedbackTest(unittest.TestCase):
         continuation = self.canvas[self.canvas.index("continueDrag(event)"):self.canvas.index("\n  endDrag(event)")]
         renderer = self.canvas[self.canvas.index("renderFilesystemFeedback(intent)"):self.canvas.index("\n  cancelDrag(event)")]
         self.assertIn("this.renderFilesystemFeedback(s.intent)", continuation)
-        self.assertTrue(renderer.startswith("renderFilesystemFeedback(intent){this.clearFilesystemFeedback()"))
+        self.assertIn("current.element===intent.targetElement", renderer)
+        self.assertIn("current.destinationId===intent.destinationId", renderer)
+        self.assertIn("current.destinationTarget===intent.destinationTarget", renderer)
+        self.assertIn("current.destinationName===intent.destinationName", renderer)
+        self.assertLess(renderer.index("return;this.clearFilesystemFeedback()"), renderer.index('document.createElement("span")'))
         self.assertIn('intent?.type!=="filesystem"', renderer)
         self.assertIn('classList.remove("filesystem-move-target"', renderer)
 

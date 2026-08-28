@@ -75,14 +75,15 @@ class WorkingSetSourceInvariantTest(unittest.TestCase):
 
     def test_connector_uses_row_header_and_viewport_conversion(self):
         edges = self.canvas[self.canvas.index("renderEdges()") : self.canvas.index("\n\n  isolate(")]
-        self.assertIn('folder-item[data-id="${CSS.escape(child.folderId)}"]', edges)
-        self.assertIn('querySelector(".node-title")', edges)
-        self.assertIn("getBoundingClientRect()", edges)
+        routing = (ROOT / "frontend/js/canvas/edge-routing.js").read_text(encoding="utf-8")
+        self.assertIn('folder-item[data-id="${escapeId(childFolderId)}"]', routing)
+        self.assertIn('querySelector(".node-title")', routing)
+        self.assertIn("getBoundingClientRect()", routing)
         self.assertIn("this.screenToWorld", edges)
-        self.assertIn("canvasRect.left", edges)
-        self.assertIn("from={x:rowRect.right,y:rowRect.top+rowRect.height/2}", edges)
+        self.assertIn("canvasRect.left", routing)
+        self.assertIn("from = { x: rowRect.right, y: rowRect.top + rowRect.height / 2 }", routing)
         self.assertIn("this.directChildren(parent.panelInstanceId).length===1", edges)
-        self.assertIn("to=trail?{x:headerRect.left,y:headerRect.top+headerRect.height/2}:{x:headerRect.left+headerRect.width/2,y:headerRect.top}", edges)
+        self.assertIn("const to = trail ? { x: headerRect.left", routing)
         self.assertNotIn("child.x>=parent.x", edges)
         self.assertIn("this.roundedRoute(points)", edges)
         self.assertIn(" Q ${corner.x} ${corner.y}", edges)

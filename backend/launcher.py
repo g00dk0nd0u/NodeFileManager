@@ -23,7 +23,7 @@ URL = f"http://{HOST}:{PORT}/"
 HEALTH_URL = f"{URL}api/health"
 
 
-def configure_logging() -> logging.Logger:
+def configure_logging(*, console: bool = True) -> logging.Logger:
     directory = log_directory()
     directory.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger("nodefilemanager")
@@ -32,7 +32,7 @@ def configure_logging() -> logging.Logger:
         handler = RotatingFileHandler(directory / "NodeFileManager.log", maxBytes=1_000_000, backupCount=3, encoding="utf-8")
         handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
         logger.addHandler(handler)
-        if not is_packaged():
+        if not is_packaged() and console:
             logger.addHandler(logging.StreamHandler())
     return logger
 
@@ -62,9 +62,10 @@ def open_browser(logger: logging.Logger) -> None:
     webbrowser.open(URL, new=0)
 
 
-def run(*, no_browser: bool = False) -> int:
-    logger = configure_logging()
-    logger.info("Application start mode=%s version=%s commit=%s python=%s bind=%s:%s", "packaged" if is_packaged() else "source", VERSION, BUILD_COMMIT, platform.python_version(), HOST, PORT)
+def run(*, no_browser: bool = False, desktop_source: bool = False) -> int:
+    logger = configure_logging(console=not desktop_source)
+    mode = "packaged" if is_packaged() else "desktop-source" if desktop_source else "source"
+    logger.info("Application start mode=%s version=%s commit=%s python=%s bind=%s:%s", mode, VERSION, BUILD_COMMIT, platform.python_version(), HOST, PORT)
     health = probe_health()
     if is_nodefilemanager_health(health):
         logger.info("Duplicate-instance reuse")
@@ -78,7 +79,7 @@ def run(*, no_browser: bool = False) -> int:
         return 2
 
     try:
-        server = create_server()
+        server = create_server(enable_source_quit=desktop_source)
     except OSError as error:
         logger.exception("Startup failure while binding port %s", PORT)
         print(f"Error: cannot start on port {PORT}: {error}", file=sys.stderr)

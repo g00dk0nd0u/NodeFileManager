@@ -1,0 +1,70 @@
+import json
+import subprocess
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).parents[2]
+
+
+def run_node(script):
+    result = subprocess.run(["node", "--input-type=module", "--eval", script], cwd=ROOT, check=True, capture_output=True, text=True)
+    return json.loads(result.stdout)
+
+
+class HistoryRuntimeTest(unittest.TestCase):
+    def test_async_history_is_bounded_clears_redo_and_retains_failed_entries(self):
+        result = run_node(r'''
+import { HistoryManager } from "./frontend/js/history/history-manager.js";
+const history=new HistoryManager({limit:2});let value=0;
+const command=(label,amount)=>({label,async redo(){value+=amount;},async undo(){value-=amount;}});
+await history.execute(command("one",1));await history.execute(command("two",2));await history.execute(command("three",3));
+await history.undo();const afterUndo={value,undo:history.undoStack.map(x=>x.label),redo:history.redoStack.map(x=>x.label)};
+await history.execute(command("four",4));const afterNew={value,redo:history.redoStack.length};
+history.record({label:"failure",async undo(){throw new Error("expected");},async redo(){}});try{await history.undo();}catch{}
+process.stdout.write(JSON.stringify({afterUndo,afterNew,failedStillPresent:history.undoStack.at(-1).label==="failure"}));
+''')
+        self.assertEqual({"value": 3, "undo": ["two"], "redo": ["three"]}, result["afterUndo"])
+        self.assertEqual({"value": 7, "redo": 0}, result["afterNew"])
+        self.assertTrue(result["failedStillPresent"])
+
+    def test_workspace_operations_share_chronological_history_and_restore_identity(self):
+        result = run_node(r'''
+import { HistoryManager } from "./frontend/js/history/history-manager.js";
+import { FolderCanvas } from "./frontend/js/canvas/canvas.js";
+const history=new HistoryManager(),canvas=Object.create(FolderCanvas.prototype);
+Object.assign(canvas,{history,nodes:new Map(),workingSets:new Map(),elements:new Map(),setElements:new Map(),selected:null,selectedItem:null,viewport:{x:0,y:0,zoom:1},canvas:{clientWidth:900,clientHeight:600},actions:{},loadChildren:async()=>({folders:[],files:[]}),render(){},changed(){},clearSelection(){this.selected=null;this.selectedItem=null;},reflowHierarchy(){}});
+await canvas.addRoot({id:"root",name:"Root",path:"/root"});const root=[...canvas.nodes.values()][0],rootPanelId=root.panelInstanceId,workingSetId=root.workingSetId;
+await canvas.openChild(rootPanelId,{id:"child",name:"Child",path:"/root/child"});const child=[...canvas.nodes.values()].find(n=>n.folderId==="child"),childPanelId=child.panelInstanceId;
+canvas.isolate(childPanelId);canvas.reattach(childPanelId);canvas.closeNode(childPanelId);
+const labels=history.undoStack.map(entry=>entry.label);await history.undo();const restored=canvas.nodes.get(childPanelId);await history.redo();const closedAgain=!canvas.nodes.has(childPanelId);await history.undo();canvas.isolate(childPanelId);
+process.stdout.write(JSON.stringify({labels,rootPanelId,workingSetId,restored:{panelInstanceId:restored.panelInstanceId,workingSetId:restored.workingSetId,visualParentPanelId:restored.visualParentPanelId,fsParentFolderId:restored.fsParentFolderId,x:restored.x,y:restored.y},closedAgain,redoCleared:history.redoStack.length===0}));
+''')
+        self.assertEqual(["Add root Folder Panel", "Open child Folder Panel", "Isolate", "Reattach", "Close Folder Panel branch"], result["labels"])
+        self.assertEqual(result["rootPanelId"], result["restored"]["visualParentPanelId"])
+        self.assertEqual(result["workingSetId"], result["restored"]["workingSetId"])
+        self.assertEqual("root", result["restored"]["fsParentFolderId"])
+        self.assertTrue(result["closedAgain"])
+        self.assertTrue(result["redoCleared"])
+
+    def test_working_set_drag_records_once_and_undo_restores_coordinates(self):
+        result = run_node(r'''
+import { HistoryManager } from "./frontend/js/history/history-manager.js";import { FolderCanvas } from "./frontend/js/canvas/canvas.js";
+const history=new HistoryManager(),node={panelInstanceId:"panel",workingSetId:"set",x:10,y:20},element={setPointerCapture(){},hasPointerCapture(){return false;}};
+const canvas=Object.create(FolderCanvas.prototype);Object.assign(canvas,{history,nodes:new Map([["panel",node]]),workingSets:new Map([["set",{workingSetId:"set"}]]),dragSession:null,clearFilesystemFeedback(){},canvas:{dataset:{}},render(){},changed(){},updatePositions(){},renderSets(){},renderEdges(){}});
+canvas.startSetDrag({button:0,stopPropagation(){},pointerId:1,currentTarget:element,clientX:0,clientY:0},"set");node.x=110;node.y=220;canvas.dragSession.dragging=true;canvas.finishDrag(true);await history.undo();
+process.stdout.write(JSON.stringify({entries:history.redoStack.length,x:canvas.nodes.get("panel").x,y:canvas.nodes.get("panel").y}));
+''')
+        self.assertEqual({"entries": 1, "x": 10, "y": 20}, result)
+
+    def test_keyboard_shortcuts_and_editable_targets(self):
+        result = run_node(r'''
+import { historyShortcut } from "./frontend/js/history/history-manager.js";
+const plain={closest(){return null;}},input={closest(){return this;}};
+const event=(key,extra={},target=plain)=>({key,ctrlKey:false,metaKey:false,shiftKey:false,altKey:false,target,...extra});
+process.stdout.write(JSON.stringify([historyShortcut(event("z",{ctrlKey:true}),"Win32"),historyShortcut(event("Z",{ctrlKey:true,shiftKey:true}),"Win32"),historyShortcut(event("y",{ctrlKey:true}),"Win32"),historyShortcut(event("z",{metaKey:true}),"MacIntel"),historyShortcut(event("z",{metaKey:true,shiftKey:true}),"MacIntel"),historyShortcut(event("z",{ctrlKey:true},input),"Win32")]));
+''')
+        self.assertEqual(["undo", "redo", "redo", "undo", "redo", None], result)
+
+
+if __name__ == "__main__":
+    unittest.main()

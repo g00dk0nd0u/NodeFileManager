@@ -24,6 +24,7 @@ button { font: inherit; }
 .toolbar h1 { font-size: 13px; letter-spacing: .025em; margin: 0 8px 0 0; }
 .toolbar button { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #555b64; border-radius: 4px; padding: 5px 9px; background: transparent; color: #d7dade; cursor: pointer; font-size: 11px; }
 .toolbar button:hover { background: #383d45; color: #fff; }
+.toolbar button:disabled { opacity: .4; cursor: default; background: transparent; }
 .toolbar #select-folder { background: #454b54; border-color: #68717d; color: #fff; font-weight: 600; }
 .toolbar #select-folder:hover { background: #505762; }
 #status { color: #aab0b8; font-size: 11px; max-width: 50vw; }

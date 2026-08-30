@@ -2,15 +2,20 @@ import { activateSearch, cancelFolderBrowser, confirmFolderBrowser, copyItem, cr
 import { FolderCanvas } from "./canvas/canvas.js";
 import { createWorkspaceSaver, restoreWorkspace } from "./workspace/workspace.js";
 import { createIcon } from "./icons.js";
+import { HistoryManager, historyShortcut } from "./history/history-manager.js";
 
 const status = document.querySelector("#status");
 const showError = (error) => { console.error(error); status.textContent = error.message || String(error); };
 const save = createWorkspaceSaver(showError);
+const undoButton=document.querySelector("#undo"),redoButton=document.querySelector("#redo");
+const history=new HistoryManager({onChange:state=>{undoButton.disabled=!state.canUndo;redoButton.disabled=!state.canRedo;undoButton.title=state.undoLabel?`Undo: ${state.undoLabel}`:"Undo";redoButton.title=state.redoLabel?`Redo: ${state.redoLabel}`:"Redo";}});
 const canvas = new FolderCanvas(document.querySelector("#canvas"), save, async (id) => {
   status.textContent = "子フォルダーを読み込んでいます…";
   try { const result = await getChildren(id); status.textContent = `${result.folders.length} フォルダー / ${result.files.length} ファイル`; return result; }
   catch (error) { showError(error); throw error; }
-});
+},history);
+async function replayHistory(direction){try{await history[direction]();}catch(error){showError(error);}}
+undoButton.addEventListener("click",()=>replayHistory("undo"));redoButton.addEventListener("click",()=>replayHistory("redo"));
 function renderNavigation(state) {
   const locationKey = (path) => navigator.userAgent.includes("Windows") ? path.toLocaleLowerCase() : path;
   const favoritePaths = new Set(state.favorites.map((item) => locationKey(item.path)));
@@ -95,4 +100,4 @@ function workspaceSearch(){const query=prompt("Search visible workspace");if(!qu
 const menu=document.querySelector("#canvas-menu");canvas.actions.canvasMenu=(x,y)=>{menu.style.left=`${x}px`;menu.style.top=`${y}px`;menu.hidden=false;};
 menu.addEventListener("click",e=>{const action=e.target.dataset.action;menu.hidden=true;if(action==="select")selectFolder();if(action==="search")workspaceSearch();});document.addEventListener("pointerdown",e=>{if(!e.target.closest("#canvas-menu"))menu.hidden=true;});
 const panelMenu=document.querySelector("#panel-menu");let panelMenuId=null;canvas.actions.panelMenu=(id,x,y)=>{panelMenuId=id;const node=canvas.nodes.get(id);panelMenu.querySelector('[data-action="isolate"]').hidden=!node?.visualParentPanelId;panelMenu.style.left=`${x}px`;panelMenu.style.top=`${y}px`;panelMenu.hidden=false;};panelMenu.addEventListener("click",event=>{const action=event.target.dataset.action,id=panelMenuId;panelMenu.hidden=true;if(action==="isolate")canvas.isolate(id);if(action==="rename")canvas.actions.rename();if(action==="new")canvas.actions.newFolder(canvas.nodes.get(id)?.folderId);});document.addEventListener("pointerdown",event=>{if(!event.target.closest("#panel-menu"))panelMenu.hidden=true;});
-document.addEventListener("keydown",event=>{if(event.key==="Escape"){closeLocalSearch();menu.hidden=true;}if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="k"){event.preventDefault();workspaceSearch();}},true);
+document.addEventListener("keydown",event=>{const historyAction=historyShortcut(event);if(historyAction){event.preventDefault();replayHistory(historyAction);return;}if(event.key==="Escape"){closeLocalSearch();menu.hidden=true;}if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="k"){event.preventDefault();workspaceSearch();}},true);

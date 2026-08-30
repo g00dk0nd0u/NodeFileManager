@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import ast
+import builtins
+from importlib.machinery import SourceFileLoader
+import importlib.util
 import logging
 from pathlib import Path
 import py_compile
@@ -61,13 +65,53 @@ class LauncherDecisionTestCase(unittest.TestCase):
         create.assert_called_once_with(enable_source_quit=True)
         logging_mock.assert_called_once_with(console=False)
 
-    def test_windows_source_entry_point_is_valid_and_delegates_to_launcher(self) -> None:
+    def load_windows_entry_point(self):
         entry_point = Path(__file__).resolve().parents[2] / "NodeFileManager.pyw"
+        loader = SourceFileLoader("nodefilemanager_pyw_test", str(entry_point))
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return entry_point, module
+
+    def test_windows_source_entry_point_is_valid_and_delegates_to_launcher(self) -> None:
+        entry_point, _module = self.load_windows_entry_point()
         py_compile.compile(str(entry_point), doraise=True)
         source = entry_point.read_text(encoding="utf-8")
         self.assertIn("from backend import launcher", source)
         self.assertIn("launcher.run(desktop_source=True)", source)
         self.assertNotIn("create_server", source)
+        top_level_backend_imports = []
+        for node in ast.parse(source).body:
+            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("backend"):
+                top_level_backend_imports.append(node)
+            elif isinstance(node, ast.Import) and any(alias.name.startswith("backend") for alias in node.names):
+                top_level_backend_imports.append(node)
+        self.assertEqual(top_level_backend_imports, [])
+
+    def test_windows_entry_point_reports_backend_import_failure(self) -> None:
+        _entry_point, module = self.load_windows_entry_point()
+        real_import = builtins.__import__
+
+        def fail_backend_import(name, *args, **kwargs):
+            if name == "backend":
+                raise ImportError("broken source checkout")
+            return real_import(name, *args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(module.os.environ, {"LOCALAPPDATA": directory}), patch.object(module, "show_startup_error") as show_error, patch.object(builtins, "__import__", side_effect=fail_backend_import):
+            self.assertEqual(module.main(), 1)
+            log_path = Path(directory) / "NodeFileManager" / "logs" / "NodeFileManager.log"
+            show_error.assert_called_once_with(log_path)
+            self.assertIn("broken source checkout", log_path.read_text(encoding="utf-8"))
+
+    def test_windows_entry_point_logs_launcher_exception_and_reports_path(self) -> None:
+        _entry_point, module = self.load_windows_entry_point()
+        with tempfile.TemporaryDirectory() as directory, patch.dict(module.os.environ, {"LOCALAPPDATA": directory}), patch.object(launcher, "run", side_effect=RuntimeError("launcher failed")), patch.object(launcher, "configure_logging", side_effect=OSError("logging unavailable")), patch.object(module, "show_startup_error") as show_error:
+            self.assertEqual(module.main(), 1)
+            log_path = Path(directory) / "NodeFileManager" / "logs" / "NodeFileManager.log"
+            show_error.assert_called_once_with(log_path)
+            self.assertIn("launcher failed", log_path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

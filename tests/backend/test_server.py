@@ -36,6 +36,7 @@ class ServerTestCase(unittest.TestCase):
     def setUp(self) -> None:
         NodeFileManagerHandler.lifecycle = ApplicationLifecycle()
         NodeFileManagerHandler.application_server = None
+        NodeFileManagerHandler.source_quit_enabled = False
 
     def request(
         self,
@@ -68,6 +69,7 @@ class ServerTestCase(unittest.TestCase):
         self.assertEqual(health["apiVersion"], 1)
         self.assertIsInstance(health["version"], str)
         self.assertIs(health["packaged"], False)
+        self.assertIs(health["quitEnabled"], False)
 
         status, body = self.request("GET", "/")
         self.assertEqual(status, 200)
@@ -106,7 +108,10 @@ class ServerTestCase(unittest.TestCase):
 
     def test_packaged_quit_is_accepted_when_idle(self) -> None:
         with patch("backend.server.is_packaged", return_value=True):
+            health_status, health_body = self.request("GET", "/api/health")
             status, body = self.request("POST", "/api/application/quit", origin="http://127.0.0.1:8000", body={})
+        self.assertEqual(health_status, 200)
+        self.assertTrue(json.loads(health_body)["quitEnabled"])
         self.assertEqual(status, 200)
         self.assertTrue(json.loads(body)["stopping"])
         self.assertFalse(NodeFileManagerHandler.lifecycle.begin_mutation())
@@ -115,6 +120,27 @@ class ServerTestCase(unittest.TestCase):
         status, body = self.request("POST", "/api/application/quit", origin="http://127.0.0.1:8000", body={})
         self.assertEqual(status, 409)
         self.assertIn("Ctrl+C", json.loads(body)["error"])
+
+    def test_desktop_source_quit_is_accepted_when_idle(self) -> None:
+        NodeFileManagerHandler.source_quit_enabled = True
+        health_status, health_body = self.request("GET", "/api/health")
+        status, body = self.request("POST", "/api/application/quit", origin="http://127.0.0.1:8000", body={})
+        self.assertEqual(health_status, 200)
+        health = json.loads(health_body)
+        self.assertFalse(health["packaged"])
+        self.assertTrue(health["quitEnabled"])
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body)["stopping"])
+
+    def test_desktop_source_quit_is_rejected_during_mutation(self) -> None:
+        NodeFileManagerHandler.source_quit_enabled = True
+        self.assertTrue(NodeFileManagerHandler.lifecycle.begin_mutation())
+        try:
+            status, body = self.request("POST", "/api/application/quit", origin="http://127.0.0.1:8000", body={})
+            self.assertEqual(status, 409)
+            self.assertEqual(json.loads(body)["code"], "operation_in_progress")
+        finally:
+            NodeFileManagerHandler.lifecycle.end_mutation()
 
     def test_invalid_host_is_rejected(self) -> None:
         status, _ = self.request("GET", "/api/health", host="attacker.example")

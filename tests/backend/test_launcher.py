@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+import py_compile
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -49,6 +50,24 @@ class LauncherDecisionTestCase(unittest.TestCase):
     def test_foreign_port_is_not_killed(self, _probe, _port, logging_mock) -> None:
         logging_mock.return_value = self.logger
         self.assertEqual(launcher.run(no_browser=True), 2)
+
+    @patch("backend.launcher.configure_logging")
+    @patch("backend.launcher.create_server", side_effect=OSError("test bind failure"))
+    @patch("backend.launcher.port_is_open", return_value=False)
+    @patch("backend.launcher.probe_health", return_value=None)
+    def test_desktop_source_enables_source_quit(self, _probe, _port, create, logging_mock) -> None:
+        logging_mock.return_value = self.logger
+        self.assertEqual(launcher.run(no_browser=True, desktop_source=True), 2)
+        create.assert_called_once_with(enable_source_quit=True)
+        logging_mock.assert_called_once_with(console=False)
+
+    def test_windows_source_entry_point_is_valid_and_delegates_to_launcher(self) -> None:
+        entry_point = Path(__file__).resolve().parents[2] / "NodeFileManager.pyw"
+        py_compile.compile(str(entry_point), doraise=True)
+        source = entry_point.read_text(encoding="utf-8")
+        self.assertIn("from backend import launcher", source)
+        self.assertIn("launcher.run(desktop_source=True)", source)
+        self.assertNotIn("create_server", source)
 
 
 if __name__ == "__main__":

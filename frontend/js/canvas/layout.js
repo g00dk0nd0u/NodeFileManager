@@ -5,6 +5,13 @@ export function panelWidth(node) {
   return (node.files?.length && node.folders?.length) ? PANEL_WIDTH.mixed : PANEL_WIDTH.single;
 }
 
+export function previewGeometry(node, workingSetBounds, preferredHeight = 280) {
+  const top = 32;
+  const height = preferredHeight;
+  const previewBottom = node.y + top + height;
+  return { top, height, workingSetBottom: Math.max(workingSetBounds.bottom, previewBottom + 42) };
+}
+
 export function childPositions(parent, count) {
   const spacing = panelWidth(parent) + 40;
   const start = parent.x - ((count - 1) * spacing) / 2;

@@ -1,6 +1,6 @@
 import { createNodeElement, updateNodeElement, updatePreviewElement } from "./node.js";
 import { applyViewport } from "./viewport.js";
-import { BRANCH_SPACING, panelWidth } from "./layout.js";
+import { BRANCH_SPACING, panelWidth, previewGeometry } from "./layout.js";
 import { measureConnectorAnchors, scrollTopToReveal, shelfRoute, trailRoute } from "./edge-routing.js";
 
 const uid = (prefix) => `${prefix}-${crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`}`;
@@ -70,7 +70,7 @@ export class FolderCanvas {
 
   handlers() { return { folder: (panelId, folder) => this.openChild(panelId, folder), parent: (id) => this.openParent(id), close: (id) => this.closeNode(id), search: (id) => this.actions.localSearch?.(id),
     isolate: (id) => this.isolate(id), reattach: (id) => this.reattach(id), panelMenu: (id,x,y) => this.actions.panelMenu?.(id,x,y), newFolder: (id) => this.actions.newFolder?.(this.nodes.get(id)?.folderId),
-    preview: (id, file) => this.preview(id, file), closePreview: (id) => this.closePreview(id), previewPage: (id, delta) => this.previewPage(id, delta), previewResized: (id) => this.previewResized(id),
+    preview: (id, file) => this.preview(id, file), closePreview: (id) => this.closePreview(id), previewPage: (id, delta) => this.previewPage(id, delta),
     drag: (event, id) => this.startDrag(event, id), selectFolder: (id) => this.selectFolder(id), selectFile: (file, el) => this.selectFile(file, el), open: (id) => this.actions.open?.(id), rename: () => this.actions.rename?.(),
     drop: (event, id, region) => this.dropFilesystem(event, id, region) }; }
 
@@ -133,9 +133,13 @@ export class FolderCanvas {
       const roots=members.filter(node=>{const parent=this.nodes.get(node.visualParentPanelId);return!parent||parent.workingSetId!==id;}),context=roots.length===1?(typeof roots[0].name==="string"&&roots[0].name.trim()?roots[0].name:"1 root"):`${roots.length} roots`;
       let el = this.setElements.get(id); if (!el) { el = document.createElement("section"); el.className = "working-set"; el.dataset.setId=id;el.innerHTML='<div class="working-set-label"><span class="working-set-kind">Working Set</span><span class="working-set-context"></span></div>'; el.addEventListener("pointerdown",event=>this.startSetDrag(event,id)); this.world.prepend(el); this.setElements.set(id, el); }
       el.querySelector(".working-set-context").textContent=context;
-      const minX = Math.min(...members.map(n => n.x)) - 42, minY = Math.min(...members.map(n => n.y)) - 58, maxX = Math.max(...members.map(n => n.x + n.renderedWidth)) + 42, maxY = Math.max(...members.map(n => n.y + n.renderedHeight)) + 42;
-      const style=this.dragSession?.type==="panel"&&this.dragSession.sourceSetId===id?this.dragSession.frozenStyle:{ transform: `translate(${minX}px,${minY}px)`, width: `${maxX-minX}px`, height: `${maxY-minY}px` }; Object.assign(el.style,style); }
+      const minX = Math.min(...members.map(n => n.x)) - 42, minY = Math.min(...members.map(n => n.y)) - 58, maxX = Math.max(...members.map(n => n.x + n.renderedWidth)) + 42, persistentMaxY = Math.max(...members.map(n => n.y + n.renderedHeight)) + 42;
+      const previewGeometries=members.filter(node=>node.preview).map(node=>[node,previewGeometry(node,{top:minY,bottom:persistentMaxY})]);
+      const maxY=Math.max(persistentMaxY,...previewGeometries.map(([,geometry])=>geometry.workingSetBottom));
+      const style=this.dragSession?.type==="panel"&&this.dragSession.sourceSetId===id?this.dragSession.frozenStyle:{ transform: `translate(${minX}px,${minY}px)`, width: `${maxX-minX}px`, height: `${maxY-minY}px` }; Object.assign(el.style,style);
+      for(const [node,geometry] of previewGeometries)this.positionPreview(node,geometry); }
   }
+  positionPreview(node,geometry){const preview=this.elements.get(node.panelInstanceId)?.querySelector(".node-preview");if(!preview)return;preview.style.top=`${geometry.top}px`;preview.style.height=`${geometry.height}px`;}
   roundedRoute(points,radius=10) {
     points=points.filter((point,index)=>!index||point.x!==points[index-1].x||point.y!==points[index-1].y);
     if(points.length<2)return "";let route=`M ${points[0].x} ${points[0].y}`;
@@ -173,7 +177,7 @@ export class FolderCanvas {
   dropFilesystem(event, destinationFolderId, region) { const kind=event.dataTransfer.getData("application/x-nodefilemanager-kind"), id=event.dataTransfer.getData("application/x-nodefilemanager-item"); if (!id || kind !== region) return; this.actions.transfer?.(id, destinationFolderId, event.altKey, kind); }
   preview(panelId, file) { const node=this.nodes.get(panelId); if (![".pdf",".jpg",".jpeg",".png"].includes((file.extension||"").toLowerCase())) { if(node?.preview)this.closePreview(panelId); return; } node.preview={...file,page:1}; this.updatePreview(panelId); this.changed(); }
   closePreview(id){const n=this.nodes.get(id);if(!n)return;delete n.preview;this.updatePreview(id);this.changed();} previewPage(id,d){const p=this.nodes.get(id)?.preview;if(!p)return;p.page=Math.max(1,p.page+d);this.updatePreview(id);}
-  updatePreview(id){const n=this.nodes.get(id),e=this.elements.get(id);if(n&&e)updatePreviewElement(e,n,this.handlers());} previewResized(id){const n=this.nodes.get(id),e=this.elements.get(id);if(n&&e){n.renderedHeight=e.offsetHeight;this.reflowHierarchy(id);this.updatePositions();this.renderSets();this.renderEdges();}}
+  updatePreview(id){const n=this.nodes.get(id),e=this.elements.get(id);if(n&&e){updatePreviewElement(e,n,this.handlers());this.renderSets();}}
   selectFolder(id){this.clearSelection(false);this.selected=id;this.elements.get(id)?.classList.add("selected");this.renderEdges();} selectFile(file,el){const connectorChanged=Boolean(this.selected);this.clearSelection(false);this.selectedItem=file;el.classList.add("selected");if(connectorChanged)this.renderEdges();}
   clearSelection(renderConnectors=true){this.world.querySelector(".file-item.selected")?.classList.remove("selected");if(this.selected)this.elements.get(this.selected)?.classList.remove("selected");this.selected=null;this.selectedItem=null;if(renderConnectors)this.renderEdges();}
   updateFavoriteStates() {}

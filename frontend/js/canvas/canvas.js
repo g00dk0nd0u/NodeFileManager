@@ -133,11 +133,13 @@ export class FolderCanvas {
       const roots=members.filter(node=>{const parent=this.nodes.get(node.visualParentPanelId);return!parent||parent.workingSetId!==id;}),context=roots.length===1?(typeof roots[0].name==="string"&&roots[0].name.trim()?roots[0].name:"1 root"):`${roots.length} roots`;
       let el = this.setElements.get(id); if (!el) { el = document.createElement("section"); el.className = "working-set"; el.dataset.setId=id;el.innerHTML='<div class="working-set-label"><span class="working-set-kind">Working Set</span><span class="working-set-context"></span></div>'; el.addEventListener("pointerdown",event=>this.startSetDrag(event,id)); this.world.prepend(el); this.setElements.set(id, el); }
       el.querySelector(".working-set-context").textContent=context;
-      const minX = Math.min(...members.map(n => n.x)) - 42, minY = Math.min(...members.map(n => n.y)) - 58, maxX = Math.max(...members.map(n => n.x + n.renderedWidth)) + 42, maxY = Math.max(...members.map(n => n.y + n.renderedHeight)) + 42;
-      const style=this.dragSession?.type==="panel"&&this.dragSession.sourceSetId===id?this.dragSession.frozenStyle:{ transform: `translate(${minX}px,${minY}px)`, width: `${maxX-minX}px`, height: `${maxY-minY}px` }; Object.assign(el.style,style); }
-    for(const node of this.nodes.values())if(node.preview)this.positionPreview(node,{top:Math.min(...[...this.nodes.values()].filter(n=>n.workingSetId===node.workingSetId).map(n=>n.y))-58,bottom:Math.max(...[...this.nodes.values()].filter(n=>n.workingSetId===node.workingSetId).map(n=>n.y+n.renderedHeight))+42});
+      const minX = Math.min(...members.map(n => n.x)) - 42, minY = Math.min(...members.map(n => n.y)) - 58, maxX = Math.max(...members.map(n => n.x + n.renderedWidth)) + 42, persistentMaxY = Math.max(...members.map(n => n.y + n.renderedHeight)) + 42;
+      const previewGeometries=members.filter(node=>node.preview).map(node=>[node,previewGeometry(node,{top:minY,bottom:persistentMaxY})]);
+      const maxY=Math.max(persistentMaxY,...previewGeometries.map(([,geometry])=>geometry.workingSetBottom));
+      const style=this.dragSession?.type==="panel"&&this.dragSession.sourceSetId===id?this.dragSession.frozenStyle:{ transform: `translate(${minX}px,${minY}px)`, width: `${maxX-minX}px`, height: `${maxY-minY}px` }; Object.assign(el.style,style);
+      for(const [node,geometry] of previewGeometries)this.positionPreview(node,geometry); }
   }
-  positionPreview(node,bounds){const preview=this.elements.get(node.panelInstanceId)?.querySelector(".node-preview");if(!preview)return;const geometry=previewGeometry(node,bounds);preview.style.top=`${geometry.top}px`;preview.style.height=`${geometry.height}px`;preview.dataset.placement=geometry.placement;}
+  positionPreview(node,geometry){const preview=this.elements.get(node.panelInstanceId)?.querySelector(".node-preview");if(!preview)return;preview.style.top=`${geometry.top}px`;preview.style.height=`${geometry.height}px`;}
   roundedRoute(points,radius=10) {
     points=points.filter((point,index)=>!index||point.x!==points[index-1].x||point.y!==points[index-1].y);
     if(points.length<2)return "";let route=`M ${points[0].x} ${points[0].y}`;

@@ -6,11 +6,10 @@ export function panelWidth(node) {
 }
 
 export function previewGeometry(node, workingSetBounds, preferredHeight = 280) {
-  const availableHeight = Math.max(0, workingSetBounds.bottom - workingSetBounds.top);
-  const height = Math.min(preferredHeight, availableHeight);
-  const attachedTop = node.y + 32;
-  const top = Math.max(workingSetBounds.top, Math.min(attachedTop, workingSetBounds.bottom - height));
-  return { top: top - node.y, height, placement: top < attachedTop ? "up" : "down" };
+  const top = 32;
+  const height = preferredHeight;
+  const previewBottom = node.y + top + height;
+  return { top, height, workingSetBottom: Math.max(workingSetBounds.bottom, previewBottom + 42) };
 }
 
 export function childPositions(parent, count) {

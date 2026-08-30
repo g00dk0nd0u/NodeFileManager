@@ -22,22 +22,31 @@ process.stdout.write(JSON.stringify(previewGeometry({json.dumps(node)}, {json.du
         )
         return json.loads(result.stdout)
 
-    def test_preview_height_is_bounded_and_contained(self):
-        geometry = self.geometry({"y": 100}, {"top": 42, "bottom": 500})
-        self.assertEqual(280, geometry["height"])
-        self.assertGreaterEqual(100 + geometry["top"], 42)
-        self.assertLessEqual(100 + geometry["top"] + geometry["height"], 500)
-
-    def test_panel_near_bottom_places_preview_upward(self):
-        geometry = self.geometry({"y": 390}, {"top": 42, "bottom": 500})
-        self.assertEqual("up", geometry["placement"])
-        self.assertEqual(500, 390 + geometry["top"] + geometry["height"])
-
-    def test_short_root_working_set_uses_all_safe_available_height(self):
+    def test_preview_has_usable_height_and_temporarily_expands_short_working_set(self):
         geometry = self.geometry({"y": 100}, {"top": 42, "bottom": 202})
-        self.assertEqual(160, geometry["height"])
-        self.assertEqual(42, 100 + geometry["top"])
-        self.assertEqual(202, 100 + geometry["top"] + geometry["height"])
+        self.assertEqual(32, geometry["top"])
+        self.assertEqual(280, geometry["height"])
+        self.assertEqual(454, geometry["workingSetBottom"])
+
+    def test_preview_begins_below_header_even_for_very_short_panel(self):
+        geometry = self.geometry(
+            {"y": 100, "renderedHeight": 40}, {"top": 42, "bottom": 182}
+        )
+        self.assertEqual(32, geometry["top"])
+        self.assertGreaterEqual(geometry["height"], 240)
+        self.assertGreater(geometry["workingSetBottom"], 182)
+
+    def test_compact_parent_area_is_not_used_for_preview(self):
+        geometry = self.geometry(
+            {"y": 100, "renderedHeight": 60, "compactParent": {"id": "parent"}},
+            {"top": 42, "bottom": 202},
+        )
+        self.assertEqual(32, geometry["top"])
+        self.assertGreaterEqual(100 + geometry["top"], 132)
+
+    def test_existing_large_working_set_does_not_expand(self):
+        geometry = self.geometry({"y": 100}, {"top": 42, "bottom": 500})
+        self.assertEqual(500, geometry["workingSetBottom"])
 
     def test_preview_geometry_does_not_mutate_panel_layout(self):
         node = {"y": 100, "x": 80, "renderedHeight": 220, "renderedWidth": 330}
@@ -77,6 +86,37 @@ process.stdout.write(JSON.stringify({before,opened,closed}));
                 for field in ("x", "y", "renderedWidth", "renderedHeight"):
                     self.assertEqual(before[field], after[field])
 
+    def test_close_restores_persistent_working_set_frame(self):
+        script = r"""
+import { FolderCanvas } from "./frontend/js/canvas/canvas.js";
+const canvas=Object.create(FolderCanvas.prototype);
+const node={panelInstanceId:"root",visualParentPanelId:null,workingSetId:"set",name:"Root",x:100,y:100,renderedWidth:330,renderedHeight:60,preview:{id:"pdf"}};
+canvas.nodes=new Map([["root",node]]);
+canvas.workingSets=new Map([["set",{}]]);
+const style={};
+const setElement={style,querySelector:()=>({textContent:""})};
+canvas.setElements=new Map([["set",setElement]]);
+const preview={style:{}};
+canvas.elements=new Map([["root",{querySelector:()=>preview}]]);
+canvas.renderSets();
+const openHeight=style.height;
+delete node.preview;
+canvas.renderSets();
+process.stdout.write(JSON.stringify({openHeight,closedHeight:style.height,previewTop:preview.style.top,previewHeight:preview.style.height}));
+"""
+        result = subprocess.run(
+            ["node", "--input-type=module", "--eval", script],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        geometry = json.loads(result.stdout)
+        self.assertEqual("412px", geometry["openHeight"])
+        self.assertEqual("160px", geometry["closedHeight"])
+        self.assertEqual("32px", geometry["previewTop"])
+        self.assertEqual("280px", geometry["previewHeight"])
+
     def test_preview_integration_keeps_hierarchy_and_working_set_geometry_stable(self):
         canvas = (ROOT / "frontend/js/canvas/canvas.js").read_text(encoding="utf-8")
         preview = canvas[canvas.index("  preview(panelId"):canvas.index("\n  selectFolder(")]
@@ -86,7 +126,8 @@ process.stdout.write(JSON.stringify({before,opened,closed}));
         self.assertNotIn("previewResized", canvas)
         sets = canvas[canvas.index("  renderSets()") : canvas.index("\n  roundedRoute")]
         self.assertIn("n.y + n.renderedHeight", sets)
-        self.assertNotIn("node.preview", sets[:sets.index("for(const node")])
+        self.assertIn("persistentMaxY", sets)
+        self.assertIn("geometry.workingSetBottom", sets)
 
     def test_pdf_and_image_share_contained_preview_container(self):
         node = (ROOT / "frontend/js/canvas/node.js").read_text(encoding="utf-8")

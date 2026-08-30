@@ -7,11 +7,12 @@ NodeFileManager は、実フォルダーを Folder Panel として空間的に�
 いずれの方法も、ヘルス確認後に既定ブラウザーで NodeFileManager を開きます。Node.js、npm、管理者権限、CDN は不要です。
 
 - **macOS — ソース checkout:** Finder で `scripts/NodeFileManager.command` をダブルクリックします。初回だけ terminal で `chmod +x scripts/NodeFileManager.command` を実行してください。終了は launcher の Terminal で `Ctrl+C` です。
-- **Windows — ソース / 社内 PC fallback:** `scripts\start.cmd` をダブルクリックします。Python 3.14 を優先し、互換 Python 3 を安全に検出します。終了は command window で `Ctrl+C` です。
+- **Windows — ソース（推奨）:** repository 直下の `NodeFileManager.pyw` をダブルクリックします。console window なしでブラウザーが開き、toolbar の **Quit** で安全に終了できます。
+- **Windows — ソース / console・debug fallback:** `scripts\start.cmd` をダブルクリックします。Python 3.14 を優先し、互換 Python 3 を安全に検出します。終了は command window で `Ctrl+C` です。
 - **Windows — standalone:** `NodeFileManager-windows-x64.zip` を展開し、フォルダー内の `NodeFileManager.exe` をダブルクリックします。Python は不要です。
 - **macOS — standalone:** `NodeFileManager-macos-x64.zip` を展開し、`NodeFileManager.app` をダブルクリックします。Python は不要です。
 
-standalone では toolbar の **Quit** が所有中の localhost server を安全に停止します。ブラウザーのタブを閉じるだけでは application process は終了しません。ソース起動では **Quit** を表示せず、Terminal/command window が lifecycle を所有します。
+standalone と Windows の `NodeFileManager.pyw` 起動では toolbar の **Quit** が所有中の localhost server を安全に停止します。ブラウザーのタブを閉じるだけでは application process は終了しません。console launcher でのソース起動では **Quit** を表示せず、Terminal/command window が lifecycle を所有します。
 
 ### 開発者向け起動
 
@@ -108,12 +109,12 @@ GitHub Actions の **Standalone test builds** は Windows x64 / macOS x64 で te
 社内 PC では Defender/EDR の警告、ネットワークドライブ、OneDrive/SharePoint のポリシー差を記録し、同期領域での変異テストはローカル確認後だけ行ってください。
 
 1. Python 3.14 を導入します（通常起動に tkinter は不要です）。
-2. `scripts\start.cmd` をダブルクリックし、ブラウザーが自動表示されることを確認します。
+2. repository 直下の `NodeFileManager.pyw` をダブルクリックし、console window なしでブラウザーが自動表示されることを確認します。console/debug fallback の確認時は `scripts\start.cmd` を使います。
 3. 空キャンバス右クリック → **Select Folder** でテストフォルダーを追加します。
 4. Trail / Shelf、connector、Working Set、Compact Parent を確認します。
 5. Isolate / Reattach と filesystem Move が別の結果になることを disposable folder で確認します。
 6. local search / Search Workspace を確認します。
-7. `Ctrl+C` で終了し、再度 `start.cmd` を実行して Working Set、materialized hierarchy、pan、zoom が戻ることを確認します。
+7. toolbar の **Quit** で終了し、再度 `NodeFileManager.pyw` を実行して Working Set、materialized hierarchy、pan、zoom が戻ることを確認します。`start.cmd` の場合は `Ctrl+C` で終了します。
 8. 選択済みフォルダーを一時的に移動して再起動し、画面が停止せず復元不能状態を処理できることを確認します。
 
 旧Tk pickerはfallbackコードとして残っていますが、通常UIからは呼び出しません。

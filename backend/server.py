@@ -70,6 +70,7 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
     picker_lock = threading.Lock()
     application_server: ThreadingHTTPServer | None = None
     lifecycle = ApplicationLifecycle()
+    source_quit_enabled = False
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, directory=str(FRONTEND_DIRECTORY), **kwargs)
@@ -182,7 +183,7 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
             return
         path = urlsplit(self.path).path
         if path == "/api/application/quit":
-            if not is_packaged():
+            if not (is_packaged() or self.source_quit_enabled):
                 self._json(409, {"error": "Use Ctrl+C to stop a source launch."})
             elif not self.lifecycle.begin_quit():
                 self._json(409, {
@@ -326,11 +327,13 @@ def health_response() -> dict[str, object]:
     return {
         "status": "ok", "app": "NodeFileManager", "apiVersion": 1,
         "version": VERSION, "commit": BUILD_COMMIT, "packaged": is_packaged(),
+        "quitEnabled": is_packaged() or NodeFileManagerHandler.source_quit_enabled,
     }
 
 
-def create_server(host: str = HOST, port: int = PORT) -> ThreadingHTTPServer:
+def create_server(host: str = HOST, port: int = PORT, *, enable_source_quit: bool = False) -> ThreadingHTTPServer:
     NodeFileManagerHandler.lifecycle = ApplicationLifecycle()
+    NodeFileManagerHandler.source_quit_enabled = enable_source_quit
     server = ThreadingHTTPServer((host, port), NodeFileManagerHandler)
     NodeFileManagerHandler.application_server = server
     return server

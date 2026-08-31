@@ -67,10 +67,13 @@ process.stdout.write(JSON.stringify([historyShortcut(event("z",{ctrlKey:true}),"
 ''')
         self.assertEqual(["undo", "redo", "redo", "undo", "redo", None], result)
 
-    def test_phase_one_invalidates_history_for_filesystem_edits_and_records_search_materialization(self):
+    def test_phase_two_records_rename_move_and_keeps_other_invalidation(self):
         app = (ROOT / "frontend/js/app.js").read_text(encoding="utf-8")
-        self.assertIn("const result=await renameItem(item.id,name);history.clear();", app)
-        self.assertIn("const result=await (copy ? copyItem : moveItem)(id, destinationId);history.clear();", app)
+        self.assertIn('history.record({label:`Rename ${item.name}`', app)
+        self.assertIn('history.record({label:`Move ${result.item.name}`', app)
+        self.assertIn('replayFileOperation(result.item.operationToken,"undo")', app)
+        self.assertIn('replayFileOperation(result.item.operationToken,"redo")', app)
+        self.assertIn("if(copy)history.clear();", app)
         self.assertIn("await createFolder(newFolderParent, name);history.clear();", app)
         self.assertIn("const before=filesystemFingerprint();", app)
         self.assertIn("if(filesystemFingerprint()!==before)history.clear();", app)

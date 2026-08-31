@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from backend.filesystem.directory_service import DirectoryService
 from backend.filesystem.opener import FileOpener
-from backend.filesystem.operations import FileOperationError, FileOperations
+from backend.filesystem.operations import FileOperationConflict, FileOperationError, FileOperations
 from backend.filesystem.roots import RootRegistry
 from backend.navigation.locations import canonical_location
 
@@ -102,6 +102,41 @@ class FileOperationsTestCase(unittest.TestCase):
         self.assertEqual(canonical_location(str(moved["path"])), canonical_location(self.destination / "report.txt"))
         self.assertTrue((self.destination / "report.txt").is_file())
         self.assertFalse(self.file.exists())
+
+    def test_rename_undo_redo_and_conflict(self):
+        renamed = self.operations.rename(str(self.file_item["id"]), "renamed.txt")
+        token = renamed["operationToken"]
+        undone = self.operations.replay(token, "undo")["item"]
+        self.assertEqual(Path(str(undone["path"])), self.file.resolve())
+        redone = self.operations.replay(token, "redo")["item"]
+        self.assertEqual(Path(str(redone["path"])), (self.source / "renamed.txt").resolve())
+        (self.source / "report.txt").write_text("occupied")
+        with self.assertRaises(FileOperationConflict) as conflict:
+            self.operations.replay(token, "undo")
+        self.assertEqual(conflict.exception.code, "undo_conflict")
+        self.assertTrue((self.source / "renamed.txt").exists())
+
+    def test_move_file_and_folder_undo_redo_preserve_registry(self):
+        for identifier, original in ((str(self.file_item["id"]), self.file), (str(self.source_item["id"]), self.source)):
+            with self.subTest(original=original):
+                moved = self.operations.move(identifier, str(self.destination_item["id"]))
+                token = moved["operationToken"]
+                undone = self.operations.replay(token, "undo")["item"]
+                self.assertEqual(Path(str(undone["path"])), original.resolve())
+                self.assertEqual(self.roots.path_for(str(undone["id"])), original.resolve())
+                redone = self.operations.replay(token, "redo")["item"]
+                self.assertEqual(Path(str(redone["path"])), (self.destination / original.name).resolve())
+                self.operations.replay(token, "undo")
+
+    def test_move_occupied_original_blocks_undo_but_receipt_remains_available(self):
+        moved = self.operations.move(str(self.file_item["id"]), str(self.destination_item["id"]))
+        self.file.write_text("replacement")
+        with self.assertRaises(FileOperationConflict) as conflict:
+            self.operations.replay(moved["operationToken"], "undo")
+        self.assertEqual(conflict.exception.code, "undo_conflict")
+        self.file.unlink()
+        undone = self.operations.replay(moved["operationToken"], "undo")["item"]
+        self.assertEqual(Path(str(undone["path"])), self.file.resolve())
 
 
 if __name__ == "__main__": unittest.main()

@@ -5,6 +5,7 @@ export class HistoryManager {
   get canUndo() { return this.undoStack.length > 0 && !this.busy; }
   get canRedo() { return this.redoStack.length > 0 && !this.busy; }
   record(entry) { this.#validate(entry); if (this.replaying || this.busy) return false; this.#append(entry); this.#changed(); return true; }
+  clear() { this.undoStack.length = 0; this.redoStack.length = 0; this.#changed(); }
   async execute(entry) { this.#validate(entry); if (this.busy) return false; this.busy = true; this.#changed(); try { await entry.redo(); this.#append(entry); return true; } finally { this.busy = false; this.#changed(); } }
   async undo() { return this.#replay(this.undoStack, this.redoStack, "undo"); }
   async redo() { return this.#replay(this.redoStack, this.undoStack, "redo"); }

@@ -21,11 +21,13 @@ await history.execute(command("one",1));await history.execute(command("two",2));
 await history.undo();const afterUndo={value,undo:history.undoStack.map(x=>x.label),redo:history.redoStack.map(x=>x.label)};
 await history.execute(command("four",4));const afterNew={value,redo:history.redoStack.length};
 history.record({label:"failure",async undo(){throw new Error("expected");},async redo(){}});try{await history.undo();}catch{}
-process.stdout.write(JSON.stringify({afterUndo,afterNew,failedStillPresent:history.undoStack.at(-1).label==="failure"}));
+const failedStillPresent=history.undoStack.at(-1).label==="failure";history.clear();
+process.stdout.write(JSON.stringify({afterUndo,afterNew,failedStillPresent,cleared:{undo:history.undoStack.length,redo:history.redoStack.length,canUndo:history.canUndo,canRedo:history.canRedo}}));
 ''')
         self.assertEqual({"value": 3, "undo": ["two"], "redo": ["three"]}, result["afterUndo"])
         self.assertEqual({"value": 7, "redo": 0}, result["afterNew"])
         self.assertTrue(result["failedStillPresent"])
+        self.assertEqual({"undo": 0, "redo": 0, "canUndo": False, "canRedo": False}, result["cleared"])
 
     def test_workspace_operations_share_chronological_history_and_restore_identity(self):
         result = run_node(r'''
@@ -64,6 +66,16 @@ const event=(key,extra={},target=plain)=>({key,ctrlKey:false,metaKey:false,shift
 process.stdout.write(JSON.stringify([historyShortcut(event("z",{ctrlKey:true}),"Win32"),historyShortcut(event("Z",{ctrlKey:true,shiftKey:true}),"Win32"),historyShortcut(event("y",{ctrlKey:true}),"Win32"),historyShortcut(event("z",{metaKey:true}),"MacIntel"),historyShortcut(event("z",{metaKey:true,shiftKey:true}),"MacIntel"),historyShortcut(event("z",{ctrlKey:true},input),"Win32")]));
 ''')
         self.assertEqual(["undo", "redo", "redo", "undo", "redo", None], result)
+
+    def test_phase_one_invalidates_history_for_filesystem_edits_and_records_search_materialization(self):
+        app = (ROOT / "frontend/js/app.js").read_text(encoding="utf-8")
+        self.assertIn("const result=await renameItem(item.id,name);history.clear();", app)
+        self.assertIn("const result=await (copy ? copyItem : moveItem)(id, destinationId);history.clear();", app)
+        self.assertIn("await createFolder(newFolderParent, name);history.clear();", app)
+        self.assertIn("const before=filesystemFingerprint();", app)
+        self.assertIn("if(filesystemFingerprint()!==before)history.clear();", app)
+        self.assertIn('canvas.commitWorkspaceEdit("Open search result Folder Panel",before)', app)
+        self.assertIn("if(canvas.nodes.size>count)", app)
 
 
 if __name__ == "__main__":

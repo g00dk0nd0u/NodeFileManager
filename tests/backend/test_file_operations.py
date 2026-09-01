@@ -176,11 +176,40 @@ class FileOperationsTestCase(unittest.TestCase):
         migrated = []
         operations = FileOperations(self.roots, self.directories, lambda old, new: migrated.append((old, new)))
         moved = operations.move(str(self.file_item["id"]), str(self.destination_item["id"]))
-        with patch("backend.filesystem.operations.shutil.move", wraps=shutil.move) as replay_move:
+        expected_source = (self.destination / "report.txt").resolve()
+        expected_target = self.file.parent.resolve() / self.file.name
+        normalized_calls = []
+        real_move = shutil.move
+        def normalized_move(source, target):
+            normalized_calls.append((Path(source).resolve(strict=True), Path(target).parent.resolve() / Path(target).name))
+            return real_move(source, target)
+        with patch("backend.filesystem.operations.shutil.move", side_effect=normalized_move) as replay_move:
             undone = operations.replay(moved["operationToken"], "undo")["item"]
-        replay_move.assert_called_once_with(str(self.destination / "report.txt"), str(self.file))
+        self.assertEqual(replay_move.call_count, 1)
+        self.assertEqual(normalized_calls, [(expected_source, expected_target)])
         self.assertEqual(self.roots.path_for(str(undone["id"])), self.file.resolve())
         self.assertEqual(migrated[-1], (str(self.destination / "report.txt"), str(self.file)))
+
+    def test_replay_rejects_source_redirected_outside_root_by_ancestor_symlink(self):
+        nested = self.source / "nested"; nested.mkdir()
+        item = self.directories.metadata(nested, str(self.source_item["id"]))
+        file_path = nested / "inside.txt"; file_path.write_text("content")
+        file_item = self.directories.metadata(file_path, str(item["id"]))
+        renamed = self.operations.rename(str(file_item["id"]), "renamed.txt")
+        with tempfile.TemporaryDirectory() as outside_directory:
+            outside = Path(outside_directory) / "nested"
+            nested.rename(outside)
+            try:
+                nested.symlink_to(outside, target_is_directory=True)
+            except (NotImplementedError, OSError) as error:
+                outside.rename(nested)
+                self.skipTest(f"symlinks unavailable: {error}")
+            with self.assertRaises(FileOperationConflict) as conflict:
+                self.operations.replay(renamed["operationToken"], "undo")
+            self.assertEqual(conflict.exception.code, "undo_conflict")
+            self.assertTrue((outside / "renamed.txt").exists())
+            self.assertFalse((outside / "inside.txt").exists())
+            nested.unlink(); outside.rename(nested)
 
 
 if __name__ == "__main__": unittest.main()

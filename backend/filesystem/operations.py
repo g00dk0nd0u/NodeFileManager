@@ -201,8 +201,12 @@ class FileOperations:
             source = receipt["changed"] if undo else receipt["original"]
             target = receipt["original"] if undo else receipt["changed"]
             assert isinstance(source, Path) and isinstance(target, Path)
-            if not (source.exists() or source.is_symlink()):
-                raise FileOperationConflict(code, "Expected source no longer exists")
+            try:
+                authorized_source = self.roots.authorize_existing_descendant(source)
+            except (OSError, PermissionError):
+                raise FileOperationConflict(code, "Expected source is no longer authorized") from None
+            if authorized_source != source:
+                raise FileOperationConflict(code, "Expected source location was redirected")
             if self._identity(source) != receipt["identity"]:
                 raise FileOperationConflict(code, "Expected source was replaced")
             case_only = source.name.casefold() == target.name.casefold() and target.exists() and source.samefile(target)

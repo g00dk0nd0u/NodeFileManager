@@ -1,7 +1,7 @@
 async function request(path, options = {}) {
   const response = await fetch(path, { ...options, headers: { "Content-Type": "application/json", ...(options.headers || {}) } });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+  if (!response.ok) { const error=new Error(body.error || `HTTP ${response.status}`);error.code=body.code;error.status=response.status;throw error; }
   return body;
 }
 export const getHealth = () => request("/api/health");
@@ -17,6 +17,7 @@ export const openFile = (id) => request("/api/files/open", { method: "POST", bod
 export const renameItem = (id, name) => request("/api/items/rename", { method: "PATCH", body: JSON.stringify({ id, name }) });
 export const copyItem = (id, destinationId) => request("/api/items/copy", { method: "POST", body: JSON.stringify({ id, destinationId }) });
 export const moveItem = (id, destinationId) => request("/api/items/move", { method: "POST", body: JSON.stringify({ id, destinationId }) });
+export const replayFileOperation = (token, direction) => request("/api/items/history", { method: "POST", body: JSON.stringify({ token, direction }) });
 export const createFolder = (parentId, name) => request("/api/folders/create", { method: "POST", body: JSON.stringify({ parentId, name }) });
 export const loadWorkspace = () => request("/api/workspace");
 export const saveWorkspace = (state) => request("/api/workspace", { method: "PUT", body: JSON.stringify(state) });

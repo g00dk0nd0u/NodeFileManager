@@ -1,12 +1,13 @@
 """Focused tests for authorized file-management services."""
 import tempfile
 import unittest
+import shutil
 from pathlib import Path
 from unittest.mock import patch
 
 from backend.filesystem.directory_service import DirectoryService
 from backend.filesystem.opener import FileOpener
-from backend.filesystem.operations import FileOperationError, FileOperations
+from backend.filesystem.operations import FileOperationConflict, FileOperationError, FileOperations
 from backend.filesystem.roots import RootRegistry
 from backend.navigation.locations import canonical_location
 
@@ -102,6 +103,132 @@ class FileOperationsTestCase(unittest.TestCase):
         self.assertEqual(canonical_location(str(moved["path"])), canonical_location(self.destination / "report.txt"))
         self.assertTrue((self.destination / "report.txt").is_file())
         self.assertFalse(self.file.exists())
+
+    def test_rename_undo_redo_and_conflict(self):
+        renamed = self.operations.rename(str(self.file_item["id"]), "renamed.txt")
+        token = renamed["operationToken"]
+        undone = self.operations.replay(token, "undo")["item"]
+        self.assertEqual(Path(str(undone["path"])), self.file.resolve())
+        redone = self.operations.replay(token, "redo")["item"]
+        self.assertEqual(Path(str(redone["path"])), (self.source / "renamed.txt").resolve())
+        (self.source / "report.txt").write_text("occupied")
+        with self.assertRaises(FileOperationConflict) as conflict:
+            self.operations.replay(token, "undo")
+        self.assertEqual(conflict.exception.code, "undo_conflict")
+        self.assertTrue((self.source / "renamed.txt").exists())
+
+    def test_move_file_and_folder_undo_redo_preserve_registry(self):
+        for identifier, original in ((str(self.file_item["id"]), self.file), (str(self.source_item["id"]), self.source)):
+            with self.subTest(original=original):
+                moved = self.operations.move(identifier, str(self.destination_item["id"]))
+                token = moved["operationToken"]
+                undone = self.operations.replay(token, "undo")["item"]
+                self.assertEqual(Path(str(undone["path"])), original.resolve())
+                self.assertEqual(self.roots.path_for(str(undone["id"])), original.resolve())
+                redone = self.operations.replay(token, "redo")["item"]
+                self.assertEqual(Path(str(redone["path"])), (self.destination / original.name).resolve())
+                self.operations.replay(token, "undo")
+
+    def test_move_occupied_original_blocks_undo_but_receipt_remains_available(self):
+        moved = self.operations.move(str(self.file_item["id"]), str(self.destination_item["id"]))
+        self.file.write_text("replacement")
+        with self.assertRaises(FileOperationConflict) as conflict:
+            self.operations.replay(moved["operationToken"], "undo")
+        self.assertEqual(conflict.exception.code, "undo_conflict")
+        self.file.unlink()
+        undone = self.operations.replay(moved["operationToken"], "undo")["item"]
+        self.assertEqual(Path(str(undone["path"])), self.file.resolve())
+
+    def test_replay_rejects_replacement_objects_without_flipping_direction(self):
+        for operation in ("rename", "move"):
+            with self.subTest(operation=operation):
+                if operation == "rename":
+                    changed = self.operations.rename(str(self.file_item["id"]), "renamed.txt")
+                else:
+                    changed = self.operations.move(str(self.file_item["id"]), str(self.destination_item["id"]))
+                changed_path = Path(str(changed["path"]))
+                replacement = changed_path.with_name("replacement.tmp")
+                replacement.write_text("replacement"); replacement.replace(changed_path)
+                with self.assertRaises(FileOperationConflict) as conflict:
+                    self.operations.replay(changed["operationToken"], "undo")
+                self.assertEqual(conflict.exception.code, "undo_conflict")
+                self.assertEqual(changed_path.read_text(), "replacement")
+                changed_path.unlink(); self.file.write_text("reset")
+                self.file_item = self.directories.metadata(self.file, str(self.source_item["id"]))
+
+    def test_in_place_file_edit_does_not_block_undo(self):
+        renamed = self.operations.rename(str(self.file_item["id"]), "renamed.txt")
+        Path(str(renamed["path"])).write_text("edited in place")
+        undone = self.operations.replay(renamed["operationToken"], "undo")["item"]
+        self.assertEqual(Path(str(undone["path"])).read_text(), "edited in place")
+
+    def test_redo_rejects_replacement_at_expected_source(self):
+        renamed = self.operations.rename(str(self.file_item["id"]), "renamed.txt")
+        self.operations.replay(renamed["operationToken"], "undo")
+        replacement = self.source / "replacement.tmp"
+        replacement.write_text("replacement"); replacement.replace(self.file)
+        with self.assertRaises(FileOperationConflict) as conflict:
+            self.operations.replay(renamed["operationToken"], "redo")
+        self.assertEqual(conflict.exception.code, "redo_conflict")
+        self.assertFalse((self.source / "renamed.txt").exists())
+
+    def test_move_replay_uses_shutil_move_and_migrates_navigation(self):
+        migrated = []
+        operations = FileOperations(self.roots, self.directories, lambda old, new: migrated.append((old, new)))
+        moved = operations.move(str(self.file_item["id"]), str(self.destination_item["id"]))
+        expected_source = (self.destination / "report.txt").resolve()
+        expected_target = self.file.parent.resolve() / self.file.name
+        normalized_calls = []
+        real_move = shutil.move
+        def normalized_move(source, target):
+            normalized_calls.append((Path(source).resolve(strict=True), Path(target).parent.resolve() / Path(target).name))
+            return real_move(source, target)
+        with patch("backend.filesystem.operations.shutil.move", side_effect=normalized_move) as replay_move:
+            undone = operations.replay(moved["operationToken"], "undo")["item"]
+        self.assertEqual(replay_move.call_count, 1)
+        self.assertEqual(normalized_calls, [(expected_source, expected_target)])
+        self.assertEqual(self.roots.path_for(str(undone["id"])), self.file.resolve())
+        migrated_old, migrated_new = (Path(location).resolve() for location in migrated[-1])
+        self.assertEqual(migrated_old, (self.destination / "report.txt").resolve())
+        self.assertEqual(migrated_new, self.file.resolve())
+
+    def test_replay_rejects_source_redirected_outside_root_by_ancestor_symlink(self):
+        nested = self.source / "nested"; nested.mkdir()
+        item = self.directories.metadata(nested, str(self.source_item["id"]))
+        file_path = nested / "inside.txt"; file_path.write_text("content")
+        file_item = self.directories.metadata(file_path, str(item["id"]))
+        renamed = self.operations.rename(str(file_item["id"]), "renamed.txt")
+        with tempfile.TemporaryDirectory() as outside_directory:
+            outside = Path(outside_directory) / "nested"
+            nested.rename(outside)
+            try:
+                nested.symlink_to(outside, target_is_directory=True)
+            except (NotImplementedError, OSError) as error:
+                outside.rename(nested)
+                self.skipTest(f"symlinks unavailable: {error}")
+            with self.assertRaises(FileOperationConflict) as conflict:
+                self.operations.replay(renamed["operationToken"], "undo")
+            self.assertEqual(conflict.exception.code, "undo_conflict")
+            self.assertTrue((outside / "renamed.txt").exists())
+            self.assertFalse((outside / "inside.txt").exists())
+            nested.unlink(); outside.rename(nested)
+
+    def test_move_replay_rejects_destination_redirected_outside_root(self):
+        moved = self.operations.move(str(self.file_item["id"]), str(self.destination_item["id"]))
+        with tempfile.TemporaryDirectory() as outside_directory:
+            outside = Path(outside_directory) / "source"
+            self.source.rename(outside)
+            try:
+                self.source.symlink_to(outside, target_is_directory=True)
+            except (NotImplementedError, OSError) as error:
+                outside.rename(self.source)
+                self.skipTest(f"symlinks unavailable: {error}")
+            with self.assertRaises(FileOperationConflict) as conflict:
+                self.operations.replay(moved["operationToken"], "undo")
+            self.assertEqual(conflict.exception.code, "undo_conflict")
+            self.assertTrue((self.destination / "report.txt").exists())
+            self.assertFalse((outside / "report.txt").exists())
+            self.source.unlink(); outside.rename(self.source)
 
 
 if __name__ == "__main__": unittest.main()

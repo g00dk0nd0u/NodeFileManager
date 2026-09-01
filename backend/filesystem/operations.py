@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
+import threading
 import uuid
 from pathlib import Path
 
@@ -15,10 +17,18 @@ class FileOperationError(ValueError):
     pass
 
 
+class FileOperationConflict(FileOperationError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 class FileOperations:
     def __init__(self, roots: RootRegistry, directories: DirectoryService, on_path_moved=None) -> None:
         self.roots, self.directories = roots, directories
         self.on_path_moved = on_path_moved or (lambda old, new: None)
+        self._receipts: dict[str, dict[str, object]] = {}
+        self._receipt_lock = threading.Lock()
 
     @staticmethod
     def _validate_name(name: object) -> str:
@@ -112,7 +122,9 @@ class FileOperations:
             # best-effort and must not misreport filesystem state.
             pass
         parent_id = None if was_root else self.roots.remember(target.parent)
-        return self.directories.metadata(target, parent_id)
+        item = self.directories.metadata(target, parent_id)
+        item["operationToken"] = self._remember_operation(source, target, "rename")
+        return item
 
     def copy(self, identifier: str, destination_id: str) -> dict[str, object]:
         source, destination = self.roots.path_for(identifier), self.roots.get(destination_id)
@@ -152,4 +164,79 @@ class FileOperations:
             # The real move succeeded; optional Quick Access persistence is
             # best-effort and must not misreport filesystem state.
             pass
-        return self.directories.metadata(target, destination_id)
+        item = self.directories.metadata(target, destination_id)
+        item["operationToken"] = self._remember_operation(source, target, "move")
+        return item
+
+    def _remember_operation(self, original: Path, changed: Path, kind: str) -> str:
+        token = uuid.uuid4().hex
+        with self._receipt_lock:
+            self._receipts[token] = {
+                "original": original, "changed": changed, "kind": kind,
+                "identity": self._identity(changed), "applied": True,
+            }
+        return token
+
+    @staticmethod
+    def _identity(path: Path) -> tuple[int, int, int]:
+        """Use stable OS object identity; file contents and timestamps are irrelevant."""
+        details = path.stat()
+        return details.st_dev, details.st_ino, stat.S_IFMT(details.st_mode)
+
+    def replay(self, token: object, direction: object) -> dict[str, object]:
+        """Replay a server-held receipt; paths are never accepted from the client."""
+        if not isinstance(token, str) or not isinstance(direction, str):
+            raise FileOperationError("A valid operation receipt is required")
+        with self._receipt_lock:
+            receipt = self._receipts.get(token)
+            if receipt is None:
+                raise FileOperationError("Unknown or expired operation receipt")
+            undo = direction == "undo"
+            if not undo and direction != "redo":
+                raise FileOperationError("Direction must be undo or redo")
+            expected_applied = undo
+            code = "undo_conflict" if undo else "redo_conflict"
+            if receipt["applied"] is not expected_applied:
+                raise FileOperationConflict(code, "Operation is not available in that direction")
+            source = receipt["changed"] if undo else receipt["original"]
+            target = receipt["original"] if undo else receipt["changed"]
+            assert isinstance(source, Path) and isinstance(target, Path)
+            try:
+                authorized_source = self.roots.authorize_existing_descendant(source)
+            except (OSError, PermissionError):
+                raise FileOperationConflict(code, "Expected source is no longer authorized") from None
+            if authorized_source != source:
+                raise FileOperationConflict(code, "Expected source location was redirected")
+            if self._identity(source) != receipt["identity"]:
+                raise FileOperationConflict(code, "Expected source was replaced")
+            if not self.roots.is_root(source):
+                try:
+                    authorized_parent = self.roots.authorize_existing_descendant(target.parent)
+                except (OSError, PermissionError):
+                    raise FileOperationConflict(code, "Destination parent is no longer authorized") from None
+                if authorized_parent != target.parent:
+                    raise FileOperationConflict(code, "Destination location was redirected")
+            case_only = source.name.casefold() == target.name.casefold() and target.exists() and source.samefile(target)
+            if not case_only and (target.exists() or target.is_symlink()):
+                raise FileOperationConflict(code, "Destination is occupied")
+            kind = receipt["kind"]
+            if kind == "move":
+                shutil.move(str(source), str(target))
+            elif case_only:
+                temporary = source.with_name(f".{source.name}.{uuid.uuid4().hex}.rename")
+                self._ensure_available(temporary); source.rename(temporary)
+                try: temporary.rename(target)
+                except OSError:
+                    temporary.rename(source); raise
+            else:
+                source.rename(target)
+            # shutil.move may copy across volumes, producing a new inode. Track
+            # the object created by that successful move for the next replay.
+            receipt["identity"] = self._identity(target)
+            self.roots.replace(source, target)
+            try: self.on_path_moved(str(source), str(target))
+            except OSError: pass
+            receipt["applied"] = not undo
+            parent_id = None if self.roots.is_root(target) else self.roots.remember(target.parent)
+            item = self.directories.metadata(target, parent_id)
+            return {"item": item, "kind": receipt["kind"]}

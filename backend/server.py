@@ -13,7 +13,7 @@ from backend.filesystem.directory_service import DirectoryService
 from backend.filesystem.folder_picker import FolderPickerUnavailable
 from backend.filesystem.folder_browser import FolderBrowser
 from backend.filesystem.opener import FileOpener
-from backend.filesystem.operations import FileOperationError, FileOperations
+from backend.filesystem.operations import FileOperationConflict, FileOperationError, FileOperations
 from backend.filesystem.roots import RootRegistry
 from backend.navigation.search import NavigationSearch
 from backend.navigation.service import NavigationService
@@ -229,7 +229,7 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
             except (ValueError, OSError, PermissionError) as error:
                 self._operation_error(error)
             return
-        if path in {"/api/files/open", "/api/items/copy", "/api/items/move", "/api/folders/create"}:
+        if path in {"/api/files/open", "/api/items/copy", "/api/items/move", "/api/items/history", "/api/folders/create"}:
             is_mutation = path != "/api/files/open"
             if is_mutation and not self.lifecycle.begin_mutation():
                 self._json(409, {"code": "application_quitting", "error": "NodeFileManager is shutting down."})
@@ -242,6 +242,8 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
                     self._json(200, {"opened": True})
                 elif path == "/api/folders/create":
                     self._json(200, {"folder": self.operations.create_folder(str(body.get("parentId", "")), body.get("name"))})
+                elif path == "/api/items/history":
+                    self._json(200, self.operations.replay(body.get("token"), body.get("direction")))
                 else:
                     destination_id = str(body.get("destinationId", ""))
                     operation = self.operations.copy if path.endswith("copy") else self.operations.move
@@ -308,6 +310,9 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
     do_DELETE = lambda self: self._reject_state_change()  # noqa: E731
 
     def _operation_error(self, error: Exception) -> None:
+        if isinstance(error, FileOperationConflict):
+            self._json(409, {"code": error.code, "error": str(error)})
+            return
         if isinstance(error, PermissionError):
             status = 403
         elif isinstance(error, FileNotFoundError):

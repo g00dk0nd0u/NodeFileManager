@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import stat
@@ -136,14 +137,22 @@ class FileOperations:
             self._copy_tree(source, target)
         else:
             shutil.copy2(source, target)
-        return self.directories.metadata(target, destination_id)
+        item = self.directories.metadata(target, destination_id)
+        item["operationToken"] = self._remember_creation(
+            source, target, "copy", item
+        )
+        return item
 
     def create_folder(self, parent_id: str, name: object) -> dict[str, object]:
         parent = self.roots.get(parent_id)
         target = parent / self._validate_name(name)
         self._ensure_available(target)
         target.mkdir()
-        return self.directories.metadata(target, parent_id)
+        item = self.directories.metadata(target, parent_id)
+        item["operationToken"] = self._remember_creation(
+            None, target, "create_folder", item
+        )
+        return item
 
     def move(self, identifier: str, destination_id: str) -> dict[str, object]:
         source, destination = self.roots.path_for(identifier), self.roots.get(destination_id)
@@ -177,11 +186,145 @@ class FileOperations:
             }
         return token
 
+    def _remember_creation(
+        self, source: Path | None, target: Path, kind: str, item: dict[str, object]
+    ) -> str:
+        token = uuid.uuid4().hex
+        with self._receipt_lock:
+            self._receipts[token] = {
+                "source": source,
+                "changed": target,
+                "kind": kind,
+                "identity": self._identity(target),
+                "snapshot": self._snapshot(target) if kind == "copy" else None,
+                "item": dict(item),
+                "applied": True,
+            }
+        return token
+
     @staticmethod
     def _identity(path: Path) -> tuple[int, int, int]:
         """Use stable OS object identity; file contents and timestamps are irrelevant."""
         details = path.stat()
         return details.st_dev, details.st_ino, stat.S_IFMT(details.st_mode)
+
+    @classmethod
+    def _snapshot(cls, path: Path) -> bytes:
+        """Hash tree structure, object identities, and every copied file's bytes."""
+        digest = hashlib.sha256()
+
+        def visit(entry: Path, relative: str) -> None:
+            if cls._is_filesystem_link(entry):
+                raise FileOperationError("Copied result contains a filesystem link")
+            identity = cls._identity(entry)
+            if entry.is_dir():
+                digest.update(
+                    b"D\0"
+                    + relative.encode("utf-8", "surrogateescape")
+                    + repr(identity).encode()
+                )
+                with os.scandir(entry) as children:
+                    names = sorted(child.name for child in children)
+                for name in names:
+                    visit(entry / name, f"{relative}/{name}")
+            elif entry.is_file():
+                digest.update(
+                    b"F\0"
+                    + relative.encode("utf-8", "surrogateescape")
+                    + repr(identity).encode()
+                )
+                with entry.open("rb") as stream:
+                    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                        digest.update(chunk)
+            else:
+                raise FileOperationError("Copied result contains an unsupported object")
+
+        visit(path, "")
+        return digest.digest()
+
+    def _authorized_exact(self, path: Path, code: str, message: str) -> None:
+        try:
+            authorized = self.roots.authorize_existing_descendant(path)
+        except (OSError, PermissionError):
+            raise FileOperationConflict(code, message) from None
+        if authorized != path:
+            raise FileOperationConflict(code, "Expected location was redirected")
+
+    def _creation_replay(
+        self, receipt: dict[str, object], undo: bool, code: str
+    ) -> dict[str, object]:
+        target = receipt["changed"]
+        assert isinstance(target, Path)
+        kind = receipt["kind"]
+        if undo:
+            self._authorized_exact(target, code, "Created item is no longer authorized")
+            try:
+                unchanged = self._identity(target) == receipt["identity"]
+                if kind == "copy":
+                    unchanged = unchanged and self._snapshot(target) == receipt["snapshot"]
+                elif kind == "create_folder":
+                    unchanged = unchanged and target.is_dir() and not any(target.iterdir())
+            except (OSError, FileOperationError):
+                unchanged = False
+            if not unchanged:
+                raise FileOperationConflict(code, "Created item was replaced or modified")
+            quarantine = target.with_name(f".{target.name}.{uuid.uuid4().hex}.undo")
+            try:
+                target.rename(quarantine)
+                unchanged = self._identity(quarantine) == receipt["identity"]
+                if kind == "copy":
+                    unchanged = unchanged and self._snapshot(quarantine) == receipt["snapshot"]
+                else:
+                    unchanged = unchanged and quarantine.is_dir() and not any(quarantine.iterdir())
+                if not unchanged:
+                    quarantine.rename(target)
+                    raise FileOperationConflict(code, "Created item changed during Undo")
+                if quarantine.is_dir():
+                    if kind == "copy":
+                        shutil.rmtree(quarantine)
+                    else:
+                        quarantine.rmdir()
+                else:
+                    quarantine.unlink()
+            except FileOperationConflict:
+                raise
+            except OSError:
+                if quarantine.exists() and not target.exists():
+                    quarantine.rename(target)
+                raise FileOperationConflict(code, "Created item could not be removed safely") from None
+            receipt["applied"] = False
+            return {"item": receipt["item"], "kind": kind, "applied": False}
+
+        try:
+            self._authorized_exact(target.parent, code, "Destination parent is no longer authorized")
+        except FileOperationConflict:
+            raise
+        if target.exists() or target.is_symlink():
+            raise FileOperationConflict(code, "Destination is occupied")
+        try:
+            if kind == "create_folder":
+                target.mkdir()
+            else:
+                source = receipt["source"]
+                assert isinstance(source, Path)
+                self._authorized_exact(source, code, "Copy source is no longer authorized")
+                self._reject_recursive(source, target.parent)
+                if source.is_dir():
+                    self._reject_linked_tree(source)
+                    self._copy_tree(source, target)
+                elif source.is_file() and not self._is_filesystem_link(source):
+                    shutil.copy2(source, target)
+                else:
+                    raise FileOperationError("Copy source is unavailable")
+            parent_id = self.roots.remember(target.parent)
+            item = self.directories.metadata(target, parent_id)
+            receipt["identity"] = self._identity(target)
+            receipt["snapshot"] = self._snapshot(target) if kind == "copy" else None
+            receipt["item"] = dict(item)
+            receipt["applied"] = True
+            return {"item": item, "kind": kind, "applied": True}
+        except (OSError, PermissionError, FileOperationError):
+            raise FileOperationConflict(code, "Operation cannot be replayed safely") from None
 
     def replay(self, token: object, direction: object) -> dict[str, object]:
         """Replay a server-held receipt; paths are never accepted from the client."""
@@ -198,6 +341,8 @@ class FileOperations:
             code = "undo_conflict" if undo else "redo_conflict"
             if receipt["applied"] is not expected_applied:
                 raise FileOperationConflict(code, "Operation is not available in that direction")
+            if receipt["kind"] in {"copy", "create_folder"}:
+                return self._creation_replay(receipt, undo, code)
             source = receipt["changed"] if undo else receipt["original"]
             target = receipt["original"] if undo else receipt["changed"]
             assert isinstance(source, Path) and isinstance(target, Path)

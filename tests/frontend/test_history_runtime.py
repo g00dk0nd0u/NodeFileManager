@@ -67,12 +67,12 @@ process.stdout.write(JSON.stringify([historyShortcut(event("z",{ctrlKey:true}),"
 ''')
         self.assertEqual(["undo", "redo", "redo", "undo", "redo", None], result)
 
-    def test_phase_two_records_rename_move_and_keeps_other_invalidation(self):
+    def test_phase_three_records_supported_filesystem_operations_and_keeps_external_invalidation(self):
         app = (ROOT / "frontend/js/app.js").read_text(encoding="utf-8")
         self.assertIn('recordFilesystemOperation(history,{label:`Rename ${item.name}`', app)
-        self.assertIn('recordFilesystemOperation(history,{label:`Move ${result.item.name}`', app)
-        self.assertIn("if(copy)history.clear();", app)
-        self.assertIn("await createFolder(newFolderParent, name);history.clear();", app)
+        self.assertIn('label:`${copy?"Copy":"Move"} ${result.item.name}`', app)
+        self.assertIn('label:`Create Folder ${name}`', app)
+        self.assertNotIn("if(copy)history.clear();", app)
         self.assertIn("const before=filesystemFingerprint();", app)
         self.assertIn("if(filesystemFingerprint()!==before)history.clear();", app)
         self.assertIn('canvas.commitWorkspaceEdit("Open search result Folder Panel",before)', app)
@@ -106,6 +106,21 @@ process.stdout.write(JSON.stringify({undo:history.undoStack.map(x=>x.label),redo
 ''')
         self.assertEqual(["Close Panel", "Move"], result["undo"])
         self.assertEqual(["Isolate"], result["redo"])
+
+    def test_workspace_and_all_supported_filesystem_entries_are_chronological(self):
+        result = run_node(r'''
+import { HistoryManager } from "./frontend/js/history/history-manager.js";
+import { recordFilesystemOperation } from "./frontend/js/history/filesystem-history.js";
+const history=new HistoryManager(),order=[];
+const workspace=label=>history.record({label,async undo(){order.push(`undo:${label}`)},async redo(){order.push(`redo:${label}`)}});
+const filesystem=label=>recordFilesystemOperation(history,{label,token:label,initialId:label,replay:async(_token,direction)=>{order.push(`${direction}:${label}`);return{item:{id:label}}},reconcile:async()=>{},reportError(){}});
+workspace("Close Panel");filesystem("Create Folder");filesystem("Rename");filesystem("Move");filesystem("Copy");workspace("Isolate");
+for(let index=0;index<6;index++)await history.undo();for(let index=0;index<6;index++)await history.redo();
+process.stdout.write(JSON.stringify({order,undo:history.undoStack.map(entry=>entry.label)}));
+''')
+        self.assertEqual(["undo:Isolate", "undo:Copy", "undo:Move", "undo:Rename", "undo:Create Folder", "undo:Close Panel",
+                          "redo:Close Panel", "redo:Create Folder", "redo:Rename", "redo:Move", "redo:Copy", "redo:Isolate"], result["order"])
+        self.assertEqual(["Close Panel", "Create Folder", "Rename", "Move", "Copy", "Isolate"], result["undo"])
 
 
 if __name__ == "__main__":

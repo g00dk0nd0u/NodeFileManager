@@ -188,7 +188,9 @@ class FileOperationsTestCase(unittest.TestCase):
         self.assertEqual(replay_move.call_count, 1)
         self.assertEqual(normalized_calls, [(expected_source, expected_target)])
         self.assertEqual(self.roots.path_for(str(undone["id"])), self.file.resolve())
-        self.assertEqual(migrated[-1], (str(self.destination / "report.txt"), str(self.file)))
+        migrated_old, migrated_new = (Path(location).resolve() for location in migrated[-1])
+        self.assertEqual(migrated_old, (self.destination / "report.txt").resolve())
+        self.assertEqual(migrated_new, self.file.resolve())
 
     def test_replay_rejects_source_redirected_outside_root_by_ancestor_symlink(self):
         nested = self.source / "nested"; nested.mkdir()

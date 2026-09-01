@@ -139,6 +139,42 @@ class FileOperationsTestCase(unittest.TestCase):
             with self.assertRaises(FileOperationConflict): self.operations.replay(token, "undo")
             self.assertEqual("keep", (external / "unknown.txt").read_text())
 
+    def test_copy_directory_undo_quarantines_without_recursive_deletion(self):
+        nested = self.source / "nested"; nested.mkdir(); child = nested / "child.txt"; child.write_text("original")
+        source_item = self.directories.metadata(nested, str(self.source_item["id"])); target = self.destination / "nested"
+        copied = self.operations.copy(str(source_item["id"]), str(self.destination_item["id"])); token = copied["operationToken"]
+        with patch("backend.filesystem.operations.shutil.rmtree") as remove_tree:
+            self.operations.replay(token, "undo")
+        remove_tree.assert_not_called(); self.assertFalse(target.exists())
+        quarantine = self.operations._receipts[token]["quarantine"]
+        self.assertIsInstance(quarantine, Path); self.assertEqual("original", (quarantine / "child.txt").read_text())
+        contents = self.directories.contents(str(self.destination_item["id"]))
+        self.assertNotIn(quarantine.name, [item["name"] for item in contents["folders"] + contents["files"]])
+        child.write_text("source changed")
+        self.operations.replay(token, "redo")
+        self.assertEqual("original", (target / "child.txt").read_text())
+        self.assertFalse(quarantine.exists())
+
+    def test_copy_redo_rejects_modified_or_replaced_quarantine(self):
+        nested = self.source / "nested"; nested.mkdir(); (nested / "child.txt").write_text("original")
+        source_item = self.directories.metadata(nested, str(self.source_item["id"])); target = self.destination / "nested"
+        for mutation in ("modified", "replaced"):
+            with self.subTest(mutation=mutation):
+                copied = self.operations.copy(str(source_item["id"]), str(self.destination_item["id"])); token = copied["operationToken"]
+                self.operations.replay(token, "undo"); quarantine = self.operations._receipts[token]["quarantine"]
+                if mutation == "modified":
+                    (quarantine / "unknown.txt").write_text("keep")
+                else:
+                    replacement = quarantine.with_name("replacement")
+                    replacement.mkdir(); (replacement / "unknown.txt").write_text("keep")
+                    quarantine.rename(quarantine.with_name("old-quarantine")); replacement.rename(quarantine)
+                with self.assertRaises(FileOperationConflict) as conflict: self.operations.replay(token, "redo")
+                self.assertEqual("redo_conflict", conflict.exception.code); self.assertFalse(target.exists())
+                self.assertEqual("keep", (quarantine / "unknown.txt").read_text())
+                shutil.rmtree(quarantine)
+                old = quarantine.with_name("old-quarantine")
+                if old.exists(): shutil.rmtree(old)
+
     def test_folder_copy_rejects_symlink_before_creating_destination(self):
         with tempfile.TemporaryDirectory() as outside:
             external = Path(outside, "external"); external.mkdir(); Path(external, "secret.txt").write_text("secret")

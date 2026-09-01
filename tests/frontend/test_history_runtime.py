@@ -107,6 +107,18 @@ process.stdout.write(JSON.stringify({undo:history.undoStack.map(x=>x.label),redo
         self.assertEqual(["Close Panel", "Move"], result["undo"])
         self.assertEqual(["Isolate"], result["redo"])
 
+    def test_filesystem_redo_conflict_keeps_entry_on_redo_stack(self):
+        result = run_node(r'''
+import { HistoryManager } from "./frontend/js/history/history-manager.js";
+import { recordFilesystemOperation } from "./frontend/js/history/filesystem-history.js";
+const history=new HistoryManager();
+recordFilesystemOperation(history,{label:"Copy",token:"opaque",initialId:"copy",replay:async(_token,direction)=>{if(direction==="redo")throw new Error("conflict");return{item:{id:"copy"}}},reconcile:async()=>{},reportError(){}});
+await history.undo();try{await history.redo();}catch{}
+process.stdout.write(JSON.stringify({undo:history.undoStack.map(x=>x.label),redo:history.redoStack.map(x=>x.label)}));
+''')
+        self.assertEqual([], result["undo"])
+        self.assertEqual(["Copy"], result["redo"])
+
     def test_workspace_and_all_supported_filesystem_entries_are_chronological(self):
         result = run_node(r'''
 import { HistoryManager } from "./frontend/js/history/history-manager.js";

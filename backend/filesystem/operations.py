@@ -197,6 +197,7 @@ class FileOperations:
                 "kind": kind,
                 "identity": self._identity(target),
                 "snapshot": self._snapshot(target) if kind == "copy" else None,
+                "quarantine": None,
                 "item": dict(item),
                 "applied": True,
             }
@@ -268,58 +269,77 @@ class FileOperations:
                 unchanged = False
             if not unchanged:
                 raise FileOperationConflict(code, "Created item was replaced or modified")
-            quarantine = target.with_name(f".{target.name}.{uuid.uuid4().hex}.undo")
+            if kind == "create_folder":
+                try:
+                    target.rmdir()
+                except OSError:
+                    raise FileOperationConflict(code, "Created folder is not empty") from None
+                receipt["applied"] = False
+                return {"item": receipt["item"], "kind": kind, "applied": False}
+
+            quarantine = target.with_name(f".nfm-undo-{uuid.uuid4().hex}")
             try:
+                self._ensure_available(quarantine)
+                self.directories.hide_internal(quarantine)
                 target.rename(quarantine)
                 unchanged = self._identity(quarantine) == receipt["identity"]
-                if kind == "copy":
-                    unchanged = unchanged and self._snapshot(quarantine) == receipt["snapshot"]
-                else:
-                    unchanged = unchanged and quarantine.is_dir() and not any(quarantine.iterdir())
+                unchanged = unchanged and self._snapshot(quarantine) == receipt["snapshot"]
                 if not unchanged:
                     quarantine.rename(target)
-                    raise FileOperationConflict(code, "Created item changed during Undo")
-                if quarantine.is_dir():
-                    if kind == "copy":
-                        shutil.rmtree(quarantine)
-                    else:
-                        quarantine.rmdir()
-                else:
-                    quarantine.unlink()
+                    raise FileOperationConflict(code, "Copied item changed during Undo")
             except FileOperationConflict:
+                self.directories.reveal_internal(quarantine)
                 raise
             except OSError:
                 if quarantine.exists() and not target.exists():
                     quarantine.rename(target)
-                raise FileOperationConflict(code, "Created item could not be removed safely") from None
+                self.directories.reveal_internal(quarantine)
+                raise FileOperationConflict(code, "Copied item could not be quarantined safely") from None
+            receipt["quarantine"] = quarantine
             receipt["applied"] = False
             return {"item": receipt["item"], "kind": kind, "applied": False}
 
-        try:
-            self._authorized_exact(target.parent, code, "Destination parent is no longer authorized")
-        except FileOperationConflict:
-            raise
+        self._authorized_exact(target.parent, code, "Destination parent is no longer authorized")
         if target.exists() or target.is_symlink():
             raise FileOperationConflict(code, "Destination is occupied")
+        if kind == "copy":
+            quarantine = receipt["quarantine"]
+            if not isinstance(quarantine, Path):
+                raise FileOperationConflict(code, "Quarantined copy is unavailable")
+            self._authorized_exact(quarantine, code, "Quarantined copy is no longer authorized")
+            try:
+                unchanged = self._identity(quarantine) == receipt["identity"]
+                unchanged = unchanged and self._snapshot(quarantine) == receipt["snapshot"]
+            except (OSError, FileOperationError):
+                unchanged = False
+            if not unchanged:
+                raise FileOperationConflict(code, "Quarantined copy was replaced or modified")
+            try:
+                quarantine.rename(target)
+                unchanged = self._identity(target) == receipt["identity"]
+                unchanged = unchanged and self._snapshot(target) == receipt["snapshot"]
+                if not unchanged:
+                    target.rename(quarantine)
+                    raise FileOperationConflict(code, "Quarantined copy changed during Redo")
+            except FileOperationConflict:
+                raise
+            except OSError:
+                if target.exists() and not quarantine.exists():
+                    target.rename(quarantine)
+                raise FileOperationConflict(code, "Quarantined copy could not be restored safely") from None
+            receipt["quarantine"] = None
+            self.directories.reveal_internal(quarantine)
+            receipt["applied"] = True
+            parent_id = self.roots.remember(target.parent)
+            item = self.directories.metadata(target, parent_id)
+            receipt["item"] = dict(item)
+            return {"item": item, "kind": kind, "applied": True}
+
         try:
-            if kind == "create_folder":
-                target.mkdir()
-            else:
-                source = receipt["source"]
-                assert isinstance(source, Path)
-                self._authorized_exact(source, code, "Copy source is no longer authorized")
-                self._reject_recursive(source, target.parent)
-                if source.is_dir():
-                    self._reject_linked_tree(source)
-                    self._copy_tree(source, target)
-                elif source.is_file() and not self._is_filesystem_link(source):
-                    shutil.copy2(source, target)
-                else:
-                    raise FileOperationError("Copy source is unavailable")
+            target.mkdir()
             parent_id = self.roots.remember(target.parent)
             item = self.directories.metadata(target, parent_id)
             receipt["identity"] = self._identity(target)
-            receipt["snapshot"] = self._snapshot(target) if kind == "copy" else None
             receipt["item"] = dict(item)
             receipt["applied"] = True
             return {"item": item, "kind": kind, "applied": True}

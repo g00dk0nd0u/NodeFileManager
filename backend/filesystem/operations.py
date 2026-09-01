@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import threading
 import uuid
 from pathlib import Path
@@ -170,8 +171,17 @@ class FileOperations:
     def _remember_operation(self, original: Path, changed: Path, kind: str) -> str:
         token = uuid.uuid4().hex
         with self._receipt_lock:
-            self._receipts[token] = {"original": original, "changed": changed, "kind": kind, "applied": True}
+            self._receipts[token] = {
+                "original": original, "changed": changed, "kind": kind,
+                "identity": self._identity(changed), "applied": True,
+            }
         return token
+
+    @staticmethod
+    def _identity(path: Path) -> tuple[int, int, int]:
+        """Use stable OS object identity; file contents and timestamps are irrelevant."""
+        details = path.stat()
+        return details.st_dev, details.st_ino, stat.S_IFMT(details.st_mode)
 
     def replay(self, token: object, direction: object) -> dict[str, object]:
         """Replay a server-held receipt; paths are never accepted from the client."""
@@ -193,10 +203,15 @@ class FileOperations:
             assert isinstance(source, Path) and isinstance(target, Path)
             if not (source.exists() or source.is_symlink()):
                 raise FileOperationConflict(code, "Expected source no longer exists")
+            if self._identity(source) != receipt["identity"]:
+                raise FileOperationConflict(code, "Expected source was replaced")
             case_only = source.name.casefold() == target.name.casefold() and target.exists() and source.samefile(target)
             if not case_only and (target.exists() or target.is_symlink()):
                 raise FileOperationConflict(code, "Destination is occupied")
-            if case_only:
+            kind = receipt["kind"]
+            if kind == "move":
+                shutil.move(str(source), str(target))
+            elif case_only:
                 temporary = source.with_name(f".{source.name}.{uuid.uuid4().hex}.rename")
                 self._ensure_available(temporary); source.rename(temporary)
                 try: temporary.rename(target)
@@ -204,6 +219,9 @@ class FileOperations:
                     temporary.rename(source); raise
             else:
                 source.rename(target)
+            # shutil.move may copy across volumes, producing a new inode. Track
+            # the object created by that successful move for the next replay.
+            receipt["identity"] = self._identity(target)
             self.roots.replace(source, target)
             try: self.on_path_moved(str(source), str(target))
             except OSError: pass

@@ -69,16 +69,43 @@ process.stdout.write(JSON.stringify([historyShortcut(event("z",{ctrlKey:true}),"
 
     def test_phase_two_records_rename_move_and_keeps_other_invalidation(self):
         app = (ROOT / "frontend/js/app.js").read_text(encoding="utf-8")
-        self.assertIn('history.record({label:`Rename ${item.name}`', app)
-        self.assertIn('history.record({label:`Move ${result.item.name}`', app)
-        self.assertIn('replayFileOperation(result.item.operationToken,"undo")', app)
-        self.assertIn('replayFileOperation(result.item.operationToken,"redo")', app)
+        self.assertIn('recordFilesystemOperation(history,{label:`Rename ${item.name}`', app)
+        self.assertIn('recordFilesystemOperation(history,{label:`Move ${result.item.name}`', app)
         self.assertIn("if(copy)history.clear();", app)
         self.assertIn("await createFolder(newFolderParent, name);history.clear();", app)
         self.assertIn("const before=filesystemFingerprint();", app)
         self.assertIn("if(filesystemFingerprint()!==before)history.clear();", app)
         self.assertIn('canvas.commitWorkspaceEdit("Open search result Folder Panel",before)', app)
         self.assertIn("if(canvas.nodes.size>count)", app)
+
+    def test_filesystem_success_advances_history_despite_reconciliation_failure(self):
+        result = run_node(r'''
+import { HistoryManager } from "./frontend/js/history/history-manager.js";
+import { recordFilesystemOperation } from "./frontend/js/history/filesystem-history.js";
+const history=new HistoryManager(),errors=[],directions=[];
+const entry=recordFilesystemOperation(history,{label:"Rename",token:"opaque",initialId:"old",replay:async(_token,direction)=>{directions.push(direction);return{item:{id:direction==="undo"?"old":"new"}};},reconcile:async()=>{throw new Error("ui failed");},reportError:error=>errors.push(error.message)});
+await entry.reconcileInitial({item:{id:"new"}});const afterInitial={undo:history.undoStack.length,redo:history.redoStack.length};
+await history.undo();const afterUndo={undo:history.undoStack.length,redo:history.redoStack.length};
+await history.redo();const afterRedo={undo:history.undoStack.length,redo:history.redoStack.length};
+process.stdout.write(JSON.stringify({afterInitial,afterUndo,afterRedo,directions,errors}));
+''')
+        self.assertEqual({"undo": 1, "redo": 0}, result["afterInitial"])
+        self.assertEqual({"undo": 0, "redo": 1}, result["afterUndo"])
+        self.assertEqual({"undo": 1, "redo": 0}, result["afterRedo"])
+        self.assertEqual(["undo", "redo"], result["directions"])
+        self.assertEqual(["ui failed"] * 3, result["errors"])
+
+    def test_filesystem_backend_conflict_keeps_mixed_history_order(self):
+        result = run_node(r'''
+import { HistoryManager } from "./frontend/js/history/history-manager.js";
+import { recordFilesystemOperation } from "./frontend/js/history/filesystem-history.js";
+const history=new HistoryManager();history.record({label:"Close Panel",async undo(){},async redo(){}});
+recordFilesystemOperation(history,{label:"Move",token:"opaque",initialId:"old",replay:async()=>{throw new Error("conflict");},reconcile:async()=>{},reportError(){}});
+history.record({label:"Isolate",async undo(){},async redo(){}});await history.undo();try{await history.undo();}catch{}
+process.stdout.write(JSON.stringify({undo:history.undoStack.map(x=>x.label),redo:history.redoStack.map(x=>x.label)}));
+''')
+        self.assertEqual(["Close Panel", "Move"], result["undo"])
+        self.assertEqual(["Isolate"], result["redo"])
 
 
 if __name__ == "__main__":

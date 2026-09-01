@@ -1,6 +1,7 @@
 """Focused tests for authorized file-management services."""
 import tempfile
 import unittest
+import shutil
 from pathlib import Path
 from unittest.mock import patch
 
@@ -137,6 +138,49 @@ class FileOperationsTestCase(unittest.TestCase):
         self.file.unlink()
         undone = self.operations.replay(moved["operationToken"], "undo")["item"]
         self.assertEqual(Path(str(undone["path"])), self.file.resolve())
+
+    def test_replay_rejects_replacement_objects_without_flipping_direction(self):
+        for operation in ("rename", "move"):
+            with self.subTest(operation=operation):
+                if operation == "rename":
+                    changed = self.operations.rename(str(self.file_item["id"]), "renamed.txt")
+                else:
+                    changed = self.operations.move(str(self.file_item["id"]), str(self.destination_item["id"]))
+                changed_path = Path(str(changed["path"]))
+                replacement = changed_path.with_name("replacement.tmp")
+                replacement.write_text("replacement"); replacement.replace(changed_path)
+                with self.assertRaises(FileOperationConflict) as conflict:
+                    self.operations.replay(changed["operationToken"], "undo")
+                self.assertEqual(conflict.exception.code, "undo_conflict")
+                self.assertEqual(changed_path.read_text(), "replacement")
+                changed_path.unlink(); self.file.write_text("reset")
+                self.file_item = self.directories.metadata(self.file, str(self.source_item["id"]))
+
+    def test_in_place_file_edit_does_not_block_undo(self):
+        renamed = self.operations.rename(str(self.file_item["id"]), "renamed.txt")
+        Path(str(renamed["path"])).write_text("edited in place")
+        undone = self.operations.replay(renamed["operationToken"], "undo")["item"]
+        self.assertEqual(Path(str(undone["path"])).read_text(), "edited in place")
+
+    def test_redo_rejects_replacement_at_expected_source(self):
+        renamed = self.operations.rename(str(self.file_item["id"]), "renamed.txt")
+        self.operations.replay(renamed["operationToken"], "undo")
+        replacement = self.source / "replacement.tmp"
+        replacement.write_text("replacement"); replacement.replace(self.file)
+        with self.assertRaises(FileOperationConflict) as conflict:
+            self.operations.replay(renamed["operationToken"], "redo")
+        self.assertEqual(conflict.exception.code, "redo_conflict")
+        self.assertFalse((self.source / "renamed.txt").exists())
+
+    def test_move_replay_uses_shutil_move_and_migrates_navigation(self):
+        migrated = []
+        operations = FileOperations(self.roots, self.directories, lambda old, new: migrated.append((old, new)))
+        moved = operations.move(str(self.file_item["id"]), str(self.destination_item["id"]))
+        with patch("backend.filesystem.operations.shutil.move", wraps=shutil.move) as replay_move:
+            undone = operations.replay(moved["operationToken"], "undo")["item"]
+        replay_move.assert_called_once_with(str(self.destination / "report.txt"), str(self.file))
+        self.assertEqual(self.roots.path_for(str(undone["id"])), self.file.resolve())
+        self.assertEqual(migrated[-1], (str(self.destination / "report.txt"), str(self.file)))
 
 
 if __name__ == "__main__": unittest.main()

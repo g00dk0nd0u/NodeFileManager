@@ -209,6 +209,13 @@ class FileOperations:
                 raise FileOperationConflict(code, "Expected source location was redirected")
             if self._identity(source) != receipt["identity"]:
                 raise FileOperationConflict(code, "Expected source was replaced")
+            if not self.roots.is_root(source):
+                try:
+                    authorized_parent = self.roots.authorize_existing_descendant(target.parent)
+                except (OSError, PermissionError):
+                    raise FileOperationConflict(code, "Destination parent is no longer authorized") from None
+                if authorized_parent != target.parent:
+                    raise FileOperationConflict(code, "Destination location was redirected")
             case_only = source.name.casefold() == target.name.casefold() and target.exists() and source.samefile(target)
             if not case_only and (target.exists() or target.is_symlink()):
                 raise FileOperationConflict(code, "Destination is occupied")

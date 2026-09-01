@@ -213,5 +213,22 @@ class FileOperationsTestCase(unittest.TestCase):
             self.assertFalse((outside / "inside.txt").exists())
             nested.unlink(); outside.rename(nested)
 
+    def test_move_replay_rejects_destination_redirected_outside_root(self):
+        moved = self.operations.move(str(self.file_item["id"]), str(self.destination_item["id"]))
+        with tempfile.TemporaryDirectory() as outside_directory:
+            outside = Path(outside_directory) / "source"
+            self.source.rename(outside)
+            try:
+                self.source.symlink_to(outside, target_is_directory=True)
+            except (NotImplementedError, OSError) as error:
+                outside.rename(self.source)
+                self.skipTest(f"symlinks unavailable: {error}")
+            with self.assertRaises(FileOperationConflict) as conflict:
+                self.operations.replay(moved["operationToken"], "undo")
+            self.assertEqual(conflict.exception.code, "undo_conflict")
+            self.assertTrue((self.destination / "report.txt").exists())
+            self.assertFalse((outside / "report.txt").exists())
+            self.source.unlink(); outside.rename(self.source)
+
 
 if __name__ == "__main__": unittest.main()

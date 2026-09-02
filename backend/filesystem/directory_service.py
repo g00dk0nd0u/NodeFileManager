@@ -3,6 +3,7 @@
 import os
 import time
 from pathlib import Path
+from threading import RLock
 
 from .roots import RootRegistry
 
@@ -10,6 +11,22 @@ from .roots import RootRegistry
 class DirectoryService:
     def __init__(self, roots: RootRegistry) -> None:
         self.roots = roots
+        self._hidden_paths: set[Path] = set()
+        self._hidden_lock = RLock()
+
+    def hide_internal(self, path: Path) -> None:
+        """Keep a server-owned mutation path out of all API listings."""
+        with self._hidden_lock:
+            self._hidden_paths.add(path.absolute())
+
+    def reveal_internal(self, path: Path) -> None:
+        with self._hidden_lock:
+            self._hidden_paths.discard(path.absolute())
+
+    def _is_hidden(self, path: Path) -> bool:
+        absolute = path.absolute()
+        with self._hidden_lock:
+            return any(hidden == absolute or hidden in absolute.parents for hidden in self._hidden_paths)
 
     def metadata(self, path: Path, parent_id: str | None = None) -> dict[str, object]:
         identifier = self.roots.remember(path)
@@ -39,6 +56,8 @@ class DirectoryService:
             raise PermissionError(f"Folder cannot be read: {error}") from error
         for entry, is_folder in entries:
             path = parent / entry.name
+            if self._is_hidden(path):
+                continue
             kind = "folder" if is_folder else "file"
             try:
                 modified_time = None if is_folder else entry.stat(follow_symlinks=False).st_mtime
@@ -102,6 +121,8 @@ class DirectoryService:
                         continue
                     is_folder = entry.is_dir(follow_symlinks=False)
                     path = current / entry.name
+                    if self._is_hidden(path):
+                        continue
                     if is_folder:
                         pending.append(path)
                     if term not in entry.name.casefold():

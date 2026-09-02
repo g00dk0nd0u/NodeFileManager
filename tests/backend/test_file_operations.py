@@ -55,6 +55,32 @@ class FileOperationsTestCase(unittest.TestCase):
             with self.subTest(name=name), self.assertRaises(FileOperationError):
                 self.operations.create_folder(str(self.source_item["id"]), name)
 
+    def test_create_folder_undo_redo_and_conflicts(self):
+        created = self.operations.create_folder(str(self.destination_item["id"]), "NewFolder")
+        target = self.destination / "NewFolder"; token = created["operationToken"]
+        self.assertFalse(self.operations.replay(token, "undo")["applied"]); self.assertFalse(target.exists())
+        self.assertTrue(self.operations.replay(token, "redo")["applied"]); self.assertTrue(target.is_dir())
+        (target / "unknown.txt").write_text("keep")
+        with self.assertRaises(FileOperationConflict) as conflict: self.operations.replay(token, "undo")
+        self.assertEqual("undo_conflict", conflict.exception.code); self.assertEqual("keep", (target / "unknown.txt").read_text())
+        (target / "unknown.txt").unlink(); self.operations.replay(token, "undo"); target.mkdir()
+        with self.assertRaises(FileOperationConflict) as conflict: self.operations.replay(token, "redo")
+        self.assertEqual("redo_conflict", conflict.exception.code); self.assertTrue(target.is_dir())
+
+    def test_create_folder_replacement_and_redirect_block_undo(self):
+        created = self.operations.create_folder(str(self.destination_item["id"]), "NewFolder")
+        target = self.destination / "NewFolder"; replacement = self.destination / "replacement"
+        replacement.mkdir(); target.rmdir(); replacement.rename(target)
+        with self.assertRaises(FileOperationConflict) as conflict: self.operations.replay(created["operationToken"], "undo")
+        self.assertEqual("undo_conflict", conflict.exception.code); self.assertTrue(target.is_dir())
+        target.rmdir()
+        with tempfile.TemporaryDirectory() as outside:
+            external = Path(outside) / "NewFolder"; external.mkdir()
+            try: target.symlink_to(external, target_is_directory=True)
+            except (NotImplementedError, OSError) as error: self.skipTest(f"symlinks unavailable: {error}")
+            with self.assertRaises(FileOperationConflict): self.operations.replay(created["operationToken"], "undo")
+            self.assertTrue(external.is_dir())
+
     def test_copy_move_collisions_and_recursive_copy(self):
         copied = self.operations.copy(str(self.file_item["id"]), str(self.destination_item["id"])); self.assertEqual(Path(str(copied["path"])).read_text(), "content")
         with self.assertRaises(FileExistsError): self.operations.copy(str(self.file_item["id"]), str(self.destination_item["id"]))
@@ -63,6 +89,91 @@ class FileOperationsTestCase(unittest.TestCase):
         nested = self.source / "nested"; nested.mkdir(); nested_item = self.directories.metadata(nested, str(self.source_item["id"]))
         with self.assertRaises(FileOperationError): self.operations.copy(str(self.source_item["id"]), str(nested_item["id"]))
         with self.assertRaises(PermissionError): self.operations.move("../../outside", str(self.destination_item["id"]))
+
+    def test_copy_file_undo_redo_and_content_conflicts(self):
+        copied = self.operations.copy(str(self.file_item["id"]), str(self.destination_item["id"]))
+        target = self.destination / "report.txt"; token = copied["operationToken"]
+        self.operations.replay(token, "undo"); self.assertFalse(target.exists())
+        self.operations.replay(token, "redo"); self.assertEqual("content", target.read_text())
+        target.write_text("modified")
+        with self.assertRaises(FileOperationConflict) as conflict: self.operations.replay(token, "undo")
+        self.assertEqual("undo_conflict", conflict.exception.code); self.assertEqual("modified", target.read_text())
+        target.unlink(); self.operations.copy(str(self.file_item["id"]), str(self.destination_item["id"]))
+
+    def test_copy_file_replacement_and_occupied_redo_are_preserved(self):
+        copied = self.operations.copy(str(self.file_item["id"]), str(self.destination_item["id"]))
+        target = self.destination / "report.txt"; token = copied["operationToken"]
+        replacement = self.destination / "replacement"; replacement.write_text("external"); replacement.replace(target)
+        with self.assertRaises(FileOperationConflict): self.operations.replay(token, "undo")
+        self.assertEqual("external", target.read_text()); target.unlink()
+        copied = self.operations.copy(str(self.file_item["id"]), str(self.destination_item["id"])); token = copied["operationToken"]
+        self.operations.replay(token, "undo"); target.write_text("occupied")
+        with self.assertRaises(FileOperationConflict) as conflict: self.operations.replay(token, "redo")
+        self.assertEqual("redo_conflict", conflict.exception.code); self.assertEqual("occupied", target.read_text())
+
+    def test_copy_directory_manifest_blocks_tree_changes_without_deleting_unknown_content(self):
+        nested = self.source / "nested"; nested.mkdir(); child = nested / "child.txt"; child.write_text("child")
+        source_item = self.directories.metadata(nested, str(self.source_item["id"])); target = self.destination / "nested"
+        for mutation in ("add", "modify", "remove"):
+            with self.subTest(mutation=mutation):
+                copied = self.operations.copy(str(source_item["id"]), str(self.destination_item["id"])); token = copied["operationToken"]
+                if mutation == "add": (target / "unknown.txt").write_text("keep")
+                elif mutation == "modify": (target / "child.txt").write_text("changed")
+                else: (target / "child.txt").unlink()
+                with self.assertRaises(FileOperationConflict) as conflict: self.operations.replay(token, "undo")
+                self.assertEqual("undo_conflict", conflict.exception.code); self.assertTrue(target.exists())
+                if mutation == "add": self.assertEqual("keep", (target / "unknown.txt").read_text())
+                shutil.rmtree(target)
+
+    def test_copy_directory_undo_redo_and_redirect_conflict(self):
+        nested = self.source / "nested"; nested.mkdir(); (nested / "child.txt").write_text("child")
+        source_item = self.directories.metadata(nested, str(self.source_item["id"])); target = self.destination / "nested"
+        copied = self.operations.copy(str(source_item["id"]), str(self.destination_item["id"])); token = copied["operationToken"]
+        self.operations.replay(token, "undo"); self.assertFalse(target.exists())
+        self.operations.replay(token, "redo"); self.assertEqual("child", (target / "child.txt").read_text())
+        shutil.rmtree(target)
+        with tempfile.TemporaryDirectory() as outside:
+            external = Path(outside) / "nested"; external.mkdir(); (external / "unknown.txt").write_text("keep")
+            try: target.symlink_to(external, target_is_directory=True)
+            except (NotImplementedError, OSError) as error: self.skipTest(f"symlinks unavailable: {error}")
+            with self.assertRaises(FileOperationConflict): self.operations.replay(token, "undo")
+            self.assertEqual("keep", (external / "unknown.txt").read_text())
+
+    def test_copy_directory_undo_quarantines_without_recursive_deletion(self):
+        nested = self.source / "nested"; nested.mkdir(); child = nested / "child.txt"; child.write_text("original")
+        source_item = self.directories.metadata(nested, str(self.source_item["id"])); target = self.destination / "nested"
+        copied = self.operations.copy(str(source_item["id"]), str(self.destination_item["id"])); token = copied["operationToken"]
+        with patch("backend.filesystem.operations.shutil.rmtree") as remove_tree:
+            self.operations.replay(token, "undo")
+        remove_tree.assert_not_called(); self.assertFalse(target.exists())
+        quarantine = self.operations._receipts[token]["quarantine"]
+        self.assertIsInstance(quarantine, Path); self.assertEqual("original", (quarantine / "child.txt").read_text())
+        contents = self.directories.contents(str(self.destination_item["id"]))
+        self.assertNotIn(quarantine.name, [item["name"] for item in contents["folders"] + contents["files"]])
+        child.write_text("source changed")
+        self.operations.replay(token, "redo")
+        self.assertEqual("original", (target / "child.txt").read_text())
+        self.assertFalse(quarantine.exists())
+
+    def test_copy_redo_rejects_modified_or_replaced_quarantine(self):
+        nested = self.source / "nested"; nested.mkdir(); (nested / "child.txt").write_text("original")
+        source_item = self.directories.metadata(nested, str(self.source_item["id"])); target = self.destination / "nested"
+        for mutation in ("modified", "replaced"):
+            with self.subTest(mutation=mutation):
+                copied = self.operations.copy(str(source_item["id"]), str(self.destination_item["id"])); token = copied["operationToken"]
+                self.operations.replay(token, "undo"); quarantine = self.operations._receipts[token]["quarantine"]
+                if mutation == "modified":
+                    (quarantine / "unknown.txt").write_text("keep")
+                else:
+                    replacement = quarantine.with_name("replacement")
+                    replacement.mkdir(); (replacement / "unknown.txt").write_text("keep")
+                    quarantine.rename(quarantine.with_name("old-quarantine")); replacement.rename(quarantine)
+                with self.assertRaises(FileOperationConflict) as conflict: self.operations.replay(token, "redo")
+                self.assertEqual("redo_conflict", conflict.exception.code); self.assertFalse(target.exists())
+                self.assertEqual("keep", (quarantine / "unknown.txt").read_text())
+                shutil.rmtree(quarantine)
+                old = quarantine.with_name("old-quarantine")
+                if old.exists(): shutil.rmtree(old)
 
     def test_folder_copy_rejects_symlink_before_creating_destination(self):
         with tempfile.TemporaryDirectory() as outside:

@@ -71,6 +71,13 @@ NodeFileManager には **表示上の navigation** と **実 filesystem mutation
 - 背景ドラッグで pan、ホイールで zoom します。
 - Working Set、展開状態、viewport は自動保存され、再起動時に現在の filesystem と照合して復元されます。
 
+### Undo / Redo
+
+- `Ctrl+Z` / `Cmd+Z` で Undo、`Ctrl+Shift+Z` / `Cmd+Shift+Z` で Redo します。Windows では `Ctrl+Y` でも Redo できます。
+- 履歴はひとつの時系列で、workspace 編集、Rename、Move、Copy、Create Folder、Favorite の追加・削除が対象です。
+- Refresh または focus 復帰時に外部 filesystem 変更を検出すると、その session の履歴を破棄します。変更がなければ Refresh しても履歴は維持されます。
+- 履歴は session 内だけに保持され、アプリの再起動後には引き継がれません。
+
 ## アーキテクチャと永続化
 
 - `frontend/`: HTML/CSS、ネイティブ ES Modules。Folder Panel、Working Set、Trail/Shelf、connector、search、preview、drag interaction を描画
@@ -133,7 +140,6 @@ repository を空白を含む path に置き、Finder で `scripts/NodeFileManag
 
 ## 既知の制限
 
-- undo / redo は未実装です。
 - 複数タブは未実装です。
 - filesystem watcher は未実装ですが、window focus / visibility復帰時と **Refresh** で再読込します。
 - Trail / Shelf による hierarchy 自動配置は実装済みですが、非常に深い階層や大量 sibling 向けの折返し・高度なpackingは未調整です。

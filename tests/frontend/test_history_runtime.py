@@ -134,6 +134,50 @@ process.stdout.write(JSON.stringify({order,undo:history.undoStack.map(entry=>ent
                           "redo:Close Panel", "redo:Create Folder", "redo:Rename", "redo:Move", "redo:Copy", "redo:Isolate"], result["order"])
         self.assertEqual(["Close Panel", "Create Folder", "Rename", "Move", "Copy", "Isolate"], result["undo"])
 
+    def test_favorite_add_remove_undo_redo_and_deterministic_replay(self):
+        result = run_node(r'''
+import { HistoryManager } from "./frontend/js/history/history-manager.js";
+import { recordFavoriteOperation } from "./frontend/js/history/favorite-history.js";
+const history=new HistoryManager(),calls=[];let favorite=true;
+const setFavorite=async(_id,desired)=>{calls.push(desired);favorite=desired;return{favorite}};
+const options={favoriteId:"known",setFavorite,renderNavigation:async()=>{},reportError(){}};
+recordFavoriteOperation(history,{...options,label:"Add Favorite A",favorite:true,initialState:{favorite:true}});
+await history.undo();favorite=true;await history.redo();
+recordFavoriteOperation(history,{...options,label:"Remove Favorite A",favorite:false,initialState:{favorite:false}});favorite=false;
+await history.undo();favorite=false;await history.redo();
+process.stdout.write(JSON.stringify({favorite,calls,labels:history.undoStack.map(entry=>entry.label)}));
+''')
+        self.assertEqual(False, result["favorite"])
+        self.assertEqual([False, True, True, False], result["calls"])
+        self.assertEqual(["Add Favorite A", "Remove Favorite A"], result["labels"])
+
+    def test_favorite_backend_failure_retains_stack_and_render_failure_does_not(self):
+        result = run_node(r'''
+import { HistoryManager } from "./frontend/js/history/history-manager.js";
+import { recordFavoriteOperation } from "./frontend/js/history/favorite-history.js";
+const history=new HistoryManager(),errors=[];let failBackend=true;
+recordFavoriteOperation(history,{label:"Add Favorite A",favoriteId:"known",favorite:true,initialState:{},setFavorite:async()=>{if(failBackend)throw new Error("backend");return{}},renderNavigation:async()=>{throw new Error("render")},reportError:error=>errors.push(error.message)});
+await new Promise(resolve=>setTimeout(resolve,0));try{await history.undo();}catch{}const afterFailure={undo:history.undoStack.length,redo:history.redoStack.length};
+failBackend=false;await history.undo();const afterSuccess={undo:history.undoStack.length,redo:history.redoStack.length};
+process.stdout.write(JSON.stringify({afterFailure,afterSuccess,errors}));
+''')
+        self.assertEqual({"undo": 1, "redo": 0}, result["afterFailure"])
+        self.assertEqual({"undo": 0, "redo": 1}, result["afterSuccess"])
+        self.assertEqual(["render", "render"], result["errors"])
+
+    def test_workspace_filesystem_and_favorite_share_order(self):
+        result = run_node(r'''
+import { HistoryManager } from "./frontend/js/history/history-manager.js";
+import { recordFavoriteOperation } from "./frontend/js/history/favorite-history.js";
+const history=new HistoryManager(),order=[];
+history.record({label:"Close Panel",undo:async()=>order.push("undo:workspace"),redo:async()=>order.push("redo:workspace")});
+history.record({label:"Rename",undo:async()=>order.push("undo:filesystem"),redo:async()=>order.push("redo:filesystem")});
+recordFavoriteOperation(history,{label:"Add Favorite A",favoriteId:"known",favorite:true,initialState:{},setFavorite:async(_id,value)=>order.push(`${value?"redo":"undo"}:favorite`),renderNavigation:async()=>{},reportError(){}});
+for(let index=0;index<3;index++)await history.undo();for(let index=0;index<3;index++)await history.redo();
+process.stdout.write(JSON.stringify(order));
+''')
+        self.assertEqual(["undo:favorite", "undo:filesystem", "undo:workspace", "redo:workspace", "redo:filesystem", "redo:favorite"], result)
+
 
 if __name__ == "__main__":
     unittest.main()

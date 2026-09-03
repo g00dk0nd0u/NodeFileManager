@@ -24,6 +24,7 @@ export const saveWorkspace = (state) => request("/api/workspace", { method: "PUT
 export const getNavigation = () => request("/api/navigation");
 export const toggleFavorite = (id) => request("/api/navigation/favorites/toggle", { method: "POST", body: JSON.stringify({ id }) });
 export const removeFavorite = (entryId) => request("/api/navigation/favorites/remove", { method: "POST", body: JSON.stringify({ entryId }) });
+export const setFavorite = (favoriteId, favorite) => request("/api/navigation/favorites/set", { method: "POST", body: JSON.stringify({ favoriteId, favorite }) });
 export const openNavigation = (entryId) => request("/api/navigation/open", { method: "POST", body: JSON.stringify({ entryId }) });
 export const visitFolder = (id) => request("/api/navigation/visit", { method: "POST", body: JSON.stringify({ id }) });
 export const searchNames = (query) => request(`/api/navigation/search?q=${encodeURIComponent(query)}`);

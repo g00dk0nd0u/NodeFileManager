@@ -200,6 +200,7 @@ class NodeFileManagerHandler(SimpleHTTPRequestHandler):
                 body = self._read_json()
                 if path == "/api/navigation/favorites/toggle": result = self.navigation.toggle(str(body.get("id", "")))
                 elif path == "/api/navigation/favorites/remove": result = self.navigation.remove(str(body.get("entryId", "")))
+                elif path == "/api/navigation/favorites/set": result = self.navigation.set_favorite(str(body.get("favoriteId", "")), body.get("favorite") is True)
                 elif path == "/api/navigation/open": result = self.navigation.open(str(body.get("entryId", "")))
                 elif path == "/api/navigation/visit": result = self.navigation.visit_authorized(str(body.get("id", "")))
                 elif path == "/api/navigation/search/activate":

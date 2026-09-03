@@ -1,9 +1,10 @@
-import { activateSearch, cancelFolderBrowser, confirmFolderBrowser, copyItem, createFolder, getChildren, getHealth, getNavigation, getParent, moveItem, navigateFolderBrowser, openFile, openNavigation, quitApplication, removeFavorite, renameItem, replayFileOperation, searchFolder, searchNames, startFolderBrowser, toggleFavorite, visitFolder } from "./api/client.js";
+import { activateSearch, cancelFolderBrowser, confirmFolderBrowser, copyItem, createFolder, getChildren, getHealth, getNavigation, getParent, moveItem, navigateFolderBrowser, openFile, openNavigation, quitApplication, removeFavorite, renameItem, replayFileOperation, searchFolder, searchNames, setFavorite, startFolderBrowser, toggleFavorite, visitFolder } from "./api/client.js";
 import { FolderCanvas } from "./canvas/canvas.js";
 import { createWorkspaceSaver, restoreWorkspace } from "./workspace/workspace.js";
 import { createIcon } from "./icons.js";
 import { HistoryManager, historyShortcut } from "./history/history-manager.js";
 import { recordFilesystemOperation } from "./history/filesystem-history.js";
+import { recordFavoriteOperation } from "./history/favorite-history.js";
 
 const status = document.querySelector("#status");
 const showError = (error) => { console.error(error); status.textContent = error.message || String(error); };
@@ -24,11 +25,11 @@ function renderNavigation(state) {
   canvas.updateFavoriteStates(favoritePaths, locationKey);
   const chips = (items, favorite) => items.map((item) => { const chip = document.createElement("span"); chip.className = `quick-chip${item.available ? "" : " unavailable"}`; chip.title = item.path;
     const open = document.createElement("button"); open.type = "button"; open.className = "quick-remove"; open.style.padding = "0"; open.textContent = item.name; open.disabled = !item.available; open.addEventListener("click", () => navigateEntry(item.id)); chip.append(open);
-    if (favorite) { const remove = document.createElement("button"); remove.type = "button"; remove.className = "quick-remove"; remove.setAttribute("aria-label", "Favorite を削除"); remove.title = "Favorite を削除"; remove.append(createIcon("close")); remove.addEventListener("click", async () => renderNavigation(await removeFavorite(item.id))); chip.append(remove); } return chip; });
+    if (favorite) { const remove = document.createElement("button"); remove.type = "button"; remove.className = "quick-remove"; remove.setAttribute("aria-label", "Favorite を削除"); remove.title = "Favorite を削除"; remove.append(createIcon("close")); remove.addEventListener("click", async () => { try { const result=await removeFavorite(item.id);recordFavoriteOperation(history,{label:`Remove Favorite ${item.name}`,favoriteId:result.favoriteId,favorite:false,setFavorite,renderNavigation,reportError:showError,initialState:result}); } catch(error) { showError(error); } }); chip.append(remove); } return chip; });
   document.querySelector("#favorites")?.replaceChildren(...chips(state.favorites, true)); document.querySelector("#hot").replaceChildren(...chips(state.hot, false));
 }
 async function navigateEntry(id) { try { const result = await openNavigation(id); renderNavigation(result); if (!canvas.revealNode(result.folder.id)) await canvas.addRoot(result.folder); status.textContent = `移動: ${result.folder.path}`; } catch (error) { showError(error); renderNavigation(await getNavigation()); } }
-canvas.actions.favorite = async (id) => { try { renderNavigation(await toggleFavorite(id)); } catch (error) { showError(error); } };
+canvas.actions.favorite = async (id) => { try { const result=await toggleFavorite(id);recordFavoriteOperation(history,{label:`${result.favorite?"Add":"Remove"} Favorite ${result.favoriteName}`,favoriteId:result.favoriteId,favorite:result.favorite,setFavorite,renderNavigation,reportError:showError,initialState:result}); } catch (error) { showError(error); } };
 canvas.actions.getParent = getParent;
 canvas.actions.visit = async (id) => { try { renderNavigation(await visitFolder(id)); } catch (error) { showError(error); } };
 

@@ -36,6 +36,17 @@ class NavigationTest(unittest.TestCase):
         self.assertFalse(self.service.toggle(folder["id"])["favorite"])
         with self.assertRaises(PermissionError): self.service.toggle("arbitrary")
 
+    def test_explicit_favorite_replay_is_idempotent(self):
+        path, folder = self.folder(); added = self.service.toggle(folder["id"]); favorite_id = added["favoriteId"]
+        self.assertFalse(self.service.set_favorite(favorite_id, False)["favorite"])
+        self.assertEqual(self.service.set_favorite(favorite_id, False)["favorites"], [])
+        self.assertTrue(self.service.set_favorite(favorite_id, True)["favorite"])
+        replayed = self.service.set_favorite(favorite_id, True)
+        self.assertEqual([canonical_location(path)], [item["path"] for item in replayed["favorites"]])
+
+    def test_explicit_favorite_replay_rejects_unknown_identifier(self):
+        with self.assertRaises(PermissionError): self.service.set_favorite("arbitrary", True)
+
     def test_favorite_persists_and_reopens_server_owned_path(self):
         path, folder = self.folder(); self.service.toggle(folder["id"])
         fresh_roots = RootRegistry(); fresh = NavigationService(fresh_roots, DirectoryService(fresh_roots), QuickAccessStore(self.store.path), lambda: self.now)

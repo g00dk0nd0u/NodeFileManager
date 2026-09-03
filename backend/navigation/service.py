@@ -20,6 +20,7 @@ def navigation_id(path: str | Path) -> str:
 class NavigationService:
     def __init__(self, roots: RootRegistry, directories: DirectoryService, store: QuickAccessStore | None = None, clock=time.time) -> None:
         self.roots, self.directories, self.store, self.clock = roots, directories, store or QuickAccessStore(), clock
+        self._favorite_paths: dict[str, str] = {}
 
     def _entry(self, item: dict[str, object], favorite: bool) -> dict[str, object]:
         path = Path(canonical_location(str(item["path"]))); available = path.is_dir()
@@ -47,11 +48,27 @@ class NavigationService:
             else: state["favorites"].append({"id": nav_id, "path": location})
             return not matches
         favorite = self.store.update(mutate)
-        return {"favorite": favorite, **self.state()}
+        self._favorite_paths[nav_id] = location
+        return {"favorite": favorite, "favoriteId": nav_id, "favoriteName": path.name or str(path), **self.state()}
+
+    def set_favorite(self, nav_id: str, favorite: bool) -> dict[str, object]:
+        """Idempotently replay a session-known Favorite mutation."""
+        state = self.store.load()
+        item = next((item for item in state["favorites"] if navigation_id(item["path"]) == nav_id), None)
+        location = canonical_location(item["path"]) if item else self._favorite_paths.get(nav_id)
+        if location is None:
+            raise PermissionError("Favorite entry is not available")
+        self._favorite_paths[nav_id] = location
+        def mutate(current):
+            current["favorites"] = [entry for entry in current["favorites"] if navigation_id(entry["path"]) != nav_id]
+            if favorite:
+                current["favorites"].append({"id": nav_id, "path": location})
+        self.store.update(mutate)
+        path = Path(location)
+        return {"favorite": favorite, "favoriteId": nav_id, "favoriteName": path.name or str(path), **self.state()}
 
     def remove(self, nav_id: str) -> dict[str, object]:
-        self.store.update(lambda state: state.update(favorites=[item for item in state["favorites"] if navigation_id(item["path"]) != nav_id]))
-        return self.state()
+        return self.set_favorite(nav_id, False)
 
     def visit_path(self, path: Path) -> None:
         now = self.clock(); location = canonical_location(path); key = navigation_id(location)
